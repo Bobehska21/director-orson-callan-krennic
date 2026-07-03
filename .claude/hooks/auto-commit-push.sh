@@ -24,10 +24,15 @@ fi
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
 ts="$(date '+%Y-%m-%d %H:%M:%S')"
 
-# 1) Commitni svoje změny.
+# 1) Commitni svoje změny. Do těla commitu přidej seznam změněných souborů +
+#    diffstat, aby další vývojář / Claude viděl, čeho přesně se změna týkala
+#    (a předešlo se kolizím – ví, čeho se nedotýkat).
 git add -A
+changed="$(git diff --cached --stat 2>/dev/null)"
 git commit -q \
   -m "auto-commit: ${ts}" \
+  -m "Změněné soubory:
+${changed}" \
   -m "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" 2>/dev/null
 
 # 2) + 3) Synchronizace s remote: nejdřív stáhni kolegovy změny (rebase), pak nahraj svoje.
