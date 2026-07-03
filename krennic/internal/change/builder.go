@@ -18,12 +18,12 @@ import (
 
 // Builder assembles ChangeEvents for a given developer identity.
 type Builder struct {
-	Developer       model.Developer
-	Redactor        *redact.Redactor
-	Namespace       string
-	DiffOptions     gitxport.DiffOptions
-	SSHKey          string
-	nowFn           func() time.Time
+	Developer   model.Developer
+	Redactor    *redact.Redactor
+	Namespace   string
+	DiffOptions gitxport.DiffOptions
+	SSHKey      string
+	nowFn       func() time.Time
 }
 
 // New returns a Builder.
@@ -116,11 +116,98 @@ func (b *Builder) Build(repoPath string) (ev model.ChangeEvent, ok bool, err err
 	return ev, true, nil
 }
 
+// BuildCommit produces a ChangeEvent for an already-created commit. It is used
+// after HEAD moves so status publishing can target the exact PR head SHA.
+func (b *Builder) BuildCommit(repoPath, sha string) (ev model.ChangeEvent, ok bool, err error) {
+	g := gitxport.New(repoPath)
+	g.SSHKey = b.SSHKey
+	if !g.IsRepo() {
+		return ev, false, fmt.Errorf("%s is not a git repo", repoPath)
+	}
+	if sha == "" {
+		sha = g.HeadSHA()
+	}
+	if sha == "" {
+		return ev, false, nil
+	}
+
+	deny := b.Redactor.IsDenied
+	mask := func(s string) string { m, _ := b.Redactor.MaskLine(s); return m }
+	diff, err := g.CommitDiff(sha, b.DiffOptions, deny, mask)
+	if err != nil {
+		return ev, false, fmt.Errorf("commit diff: %w", err)
+	}
+	if len(diff.Hunks) == 0 {
+		return ev, false, nil
+	}
+
+	now := b.nowFn().UTC()
+	branch := g.CurrentBranch()
+	repoName := g.RepoName()
+	shadowRef := gitxport.ShadowRefName(b.Namespace, b.Developer.UserSlug, repoName, branch)
+
+	dev := b.Developer
+	if name, email := g.GitIdentity(); name != "" || email != "" {
+		if name != "" {
+			dev.GitName = name
+		}
+		dev.GitEmail = email
+	}
+
+	sort.Strings(diff.Languages)
+	sort.Strings(diff.ChangedFiles)
+
+	ev = model.ChangeEvent{
+		SchemaVersion: model.SchemaVersion,
+		ChangeID:      uuid.NewString(),
+		TraceID:       uuid.NewString(),
+		CreatedAt:     now,
+		Developer:     dev,
+		Repo: model.Repo{
+			Name:      repoName,
+			RootHint:  repoName,
+			Remote:    g.RemoteURL("origin"),
+			Branch:    branch,
+			HeadSHA:   sha,
+			ShadowRef: shadowRef,
+			ShadowSHA: sha,
+			LocalPath: repoPath,
+		},
+		Summary: model.Summary{
+			FilesChanged:  len(diff.ChangedFiles),
+			LinesAdded:    diff.LinesAdded,
+			LinesRemoved:  diff.LinesRemoved,
+			Languages:     diff.Languages,
+			RedactedPaths: b.redactedPathsInCommit(g, sha),
+			Truncated:     diff.Truncated,
+		},
+		Diff: model.Diff{
+			Format:       "unified",
+			ContextLines: b.DiffOptions.ContextLines,
+			Hunks:        diff.Hunks,
+		},
+		RoutingHints: model.RoutingHints{BudgetTier: "normal"},
+		ContentHash:  contentHash(diff.Hunks),
+	}
+	return ev, true, nil
+}
+
 // redactedPaths lists changed paths that were excluded by the deny list, so the
 // developer can see transparently what was withheld from AI/transport.
 func (b *Builder) redactedPaths(g *gitxport.Git) []string {
 	var out []string
 	for _, p := range g.ChangedPaths() {
+		if b.Redactor.IsDenied(p) {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (b *Builder) redactedPathsInCommit(g *gitxport.Git, sha string) []string {
+	var out []string
+	for _, p := range g.ChangedPathsInCommit(sha) {
 		if b.Redactor.IsDenied(p) {
 			out = append(out, p)
 		}

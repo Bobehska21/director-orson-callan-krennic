@@ -43,6 +43,7 @@ type AgentConfig struct {
 	MaxWaitMS     int      `toml:"max_wait_ms"`
 	DashboardAddr string   `toml:"dashboard_addr"`
 	AIWorkers     int      `toml:"ai_workers"`
+	HeadPollMS    int      `toml:"head_poll_ms"`
 }
 
 type RepoConfig struct {
@@ -132,6 +133,7 @@ func Default() Config {
 			MaxWaitMS:     5000,
 			DashboardAddr: "127.0.0.1:7373",
 			AIWorkers:     2,
+			HeadPollMS:    5000,
 		},
 		Redaction: RedactionConfig{
 			Deny:      []string{".env*", "*.pem", "*.key", "id_rsa*", "secrets/**"},
@@ -187,6 +189,9 @@ func (c *Config) normalize() {
 	}
 	if c.Agent.AIWorkers == 0 {
 		c.Agent.AIWorkers = 2
+	}
+	if c.Agent.HeadPollMS == 0 {
+		c.Agent.HeadPollMS = 5000
 	}
 	if c.Git.ShadowNamespace == "" {
 		c.Git.ShadowNamespace = "refs/ai"

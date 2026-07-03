@@ -91,6 +91,59 @@ func TestBuildRedactsSecretsAndProducesEvent(t *testing.T) {
 	}
 }
 
+func TestBuildCommitTargetsHeadSHA(t *testing.T) {
+	dir := t.TempDir()
+	gitRun(t, dir, "init", "-q")
+	gitRun(t, dir, "config", "user.email", "test@example.com")
+	gitRun(t, dir, "config", "user.name", "Test")
+	gitRun(t, dir, "config", "commit.gpgsign", "false")
+	writeFile(t, dir, "app.go", "package app\nfunc A(){}\n")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-q", "-m", "init")
+
+	writeFile(t, dir, "app.go", "package app\nfunc A(){ println(1) }\n")
+	writeFile(t, dir, ".env", "API_KEY=supersecret\n")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-q", "-m", "change")
+
+	head := gitOutput(t, dir, "rev-parse", "HEAD")
+	dev := model.Developer{UserSlug: "tester", GitName: "Test", Machine: "host"}
+	r := redact.New([]string{".env*", "*.pem"}, true)
+	b := New(dev, r, "refs/ai", "")
+
+	ev, ok, err := b.BuildCommit(dir, head)
+	if err != nil {
+		t.Fatalf("build commit: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected an analyzable commit event")
+	}
+	if ev.Repo.HeadSHA != head {
+		t.Fatalf("HeadSHA = %q, want %q", ev.Repo.HeadSHA, head)
+	}
+	if ev.Repo.ShadowSHA != head {
+		t.Fatalf("ShadowSHA = %q, want %q", ev.Repo.ShadowSHA, head)
+	}
+	if !contains(ev.Summary.RedactedPaths, ".env") {
+		t.Errorf("expected .env in redacted_paths, got %v", ev.Summary.RedactedPaths)
+	}
+	for _, h := range ev.Diff.Hunks {
+		if h.Path == ".env" || strings.Contains(h.Patch, "supersecret") {
+			t.Fatalf("secret leaked into commit event: %#v", h)
+		}
+	}
+}
+
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func contains(list []string, want string) bool {
 	for _, s := range list {
 		if s == want {

@@ -47,6 +47,7 @@ type Agent struct {
 	repos     []string
 	remoteFor map[string]string
 	sshKey    string
+	lastHead  map[string]string
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -135,7 +136,7 @@ func New(cfg config.Config, log *slog.Logger) (*Agent, error) {
 	return &Agent{
 		cfg: cfg, log: log, store: st, metrics: metrics,
 		builder: builder, gateway: gateway, publisher: pub, reporter: issueReporter, hubClient: hubClient,
-		repos: repos, remoteFor: remoteFor, sshKey: sshKey,
+		repos: repos, remoteFor: remoteFor, sshKey: sshKey, lastHead: map[string]string{},
 		wake: make(chan struct{}, 64),
 	}, nil
 }
@@ -199,6 +200,8 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.wg.Add(1)
 		go a.outboxSender()
 	}
+	a.wg.Add(1)
+	go a.headPoller()
 
 	// Start the local dashboard/control server.
 	srv := a.newHTTPServer()
@@ -250,6 +253,79 @@ func (a *Agent) handleChange(repoRoot string) {
 	case a.wake <- struct{}{}:
 	default:
 	}
+}
+
+func (a *Agent) headPoller() {
+	defer a.wg.Done()
+	interval := time.Duration(a.cfg.Agent.HeadPollMS) * time.Millisecond
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	a.scanHeads(true)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		case <-ticker.C:
+			a.scanHeads(false)
+		}
+	}
+}
+
+func (a *Agent) scanHeads(initial bool) {
+	for _, repoRoot := range a.repos {
+		g := gitxport.New(repoRoot)
+		head := g.HeadSHA()
+		if head == "" {
+			continue
+		}
+		if a.lastHead[repoRoot] == head {
+			continue
+		}
+		a.lastHead[repoRoot] = head
+		// On startup we still review non-main branch heads so a daemon restart can
+		// repair a missing PR status. Main/master are skipped to avoid spending AI
+		// budget on already-integrated baseline commits.
+		if initial && isMainBranch(g.CurrentBranch()) {
+			continue
+		}
+		a.handleHeadChange(repoRoot, head)
+	}
+}
+
+func (a *Agent) handleHeadChange(repoRoot, head string) {
+	if a.isPaused() {
+		return
+	}
+	ev, ok, err := a.builder.BuildCommit(repoRoot, head)
+	if err != nil {
+		a.log.Warn("build commit change failed", "repo", repoRoot, "head", head, "err", err)
+		return
+	}
+	if !ok {
+		return
+	}
+	if seen, _ := a.store.SeenRecently(ev.ContentHash, dedupWindow); seen {
+		return
+	}
+	if err := a.store.Enqueue(ev); err != nil {
+		a.log.Warn("enqueue commit failed", "err", err)
+		return
+	}
+	a.metrics.Inc(telemetry.ChangesProcessed)
+	a.updateQueueDepth()
+	a.log.Info("commit queued", "repo", ev.Repo.Name, "branch", ev.Repo.Branch,
+		"head", short(head), "change_id", ev.ChangeID, "trace_id", ev.TraceID)
+	select {
+	case a.wake <- struct{}{}:
+	default:
+	}
+}
+
+func isMainBranch(branch string) bool {
+	return branch == "main" || branch == "master"
 }
 
 // worker claims queued events and processes them.

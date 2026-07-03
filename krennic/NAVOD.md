@@ -263,6 +263,8 @@ commit v PR. Když Krennic najde vážný problém, PR se nesloučí, dokud se k
 neopraví a Krennic nepošle nový zelený stav. Pokud je zapnuté `[issues]`, zároveň
 založí GitHub issue s labely `backend` nebo `frontend` podle změněných souborů.
 Jakmile další review na stejné větvi projde, Krennic tu issue automaticky zavře.
+Nové commity hlídá automaticky, takže po commitu/pushi pošle status na správný
+poslední commit PR.
 
 Jednoduché pravidlo pro každého vývojáře:
 

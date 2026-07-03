@@ -10,6 +10,7 @@ debounce_ms    = 800             # okno pro sloučení bursty uložení
 max_wait_ms    = 5000            # strop: snapshot alespoň jednou za tuto dobu
 dashboard_addr = "127.0.0.1:7373"
 ai_workers     = 2               # paralelní AI workeři (respektuje rate limity)
+head_poll_ms   = 5000            # hlídá nové commity a publikuje status na přesný PR HEAD
 
 # Volitelný explicitní seznam repozitářů (jinak auto-discovery z watch_roots).
 # [[repos]]

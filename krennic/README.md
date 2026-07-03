@@ -95,11 +95,13 @@ verdiktem `pass` nebo `comment`, otevřenou issue automaticky zavře.
 2. Pracuje normálně lokálně; Krennic průběžně sleduje uložené změny.
 3. Krennic po debounce okně vytvoří stínový snapshot, spustí AI triage/review a
    publikuje `krennic/ai-review` na GitHub pro aktuální commit.
-4. Pokud review vrátí `request-changes`, Krennic založí nebo aktualizuje GitHub
+4. Po commitu Krennic navíc hlídá pohyb `HEAD` (`head_poll_ms`) a znovu hodnotí
+   přesný commit, který bude headem PR. Tím se status publikuje na správné SHA.
+5. Pokud review vrátí `request-changes`, Krennic založí nebo aktualizuje GitHub
    issue.
-5. Vývojář otevře Pull Request.
-6. GitHub Actions spustí `test`, `vet` a `build`.
-7. PR se může sloučit až po zeleném CI a zeleném `krennic/ai-review`.
+6. Vývojář otevře Pull Request.
+7. GitHub Actions spustí `test`, `vet` a `build`.
+8. PR se může sloučit až po zeleném CI a zeleném `krennic/ai-review`.
 
 Pokud PR po pushi čeká na `krennic/ai-review`, nejdřív ověř, že Krennic na PC
 autora běží (`krennic status`), že daný repozitář patří do `watch_roots`, a že je
