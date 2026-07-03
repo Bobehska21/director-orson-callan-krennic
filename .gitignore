@@ -1,5 +1,6 @@
 # Build artefakty
 krennic/dist/
+krennic/.gocache/
 *.exe
 
 # Lokální nastavení Claude Code

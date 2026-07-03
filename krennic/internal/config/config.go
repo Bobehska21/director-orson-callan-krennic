@@ -22,6 +22,7 @@ type Config struct {
 	AI        AIConfig        `toml:"ai"`
 	Budget    BudgetConfig    `toml:"budget"`
 	Status    StatusConfig    `toml:"status"`
+	Issues    IssuesConfig    `toml:"issues"`
 	Telemetry TelemetryConfig `toml:"telemetry"`
 	Hub       HubConfig       `toml:"hub"`
 }
@@ -93,6 +94,12 @@ type StatusConfig struct {
 	Identity string `toml:"identity"` // keychain key name, repo:status scope
 }
 
+type IssuesConfig struct {
+	Enabled  bool   `toml:"enabled"`
+	Provider string `toml:"provider"`
+	Identity string `toml:"identity"` // keychain key name, issues:write scope
+}
+
 type TelemetryConfig struct {
 	Enabled      bool   `toml:"enabled"`
 	OTLPEndpoint string `toml:"otlp_endpoint"`
@@ -146,6 +153,7 @@ func Default() Config {
 		},
 		Budget:    BudgetConfig{DailyUSD: 5.0},
 		Status:    StatusConfig{Enabled: false, Provider: "github", Identity: "status-token"},
+		Issues:    IssuesConfig{Enabled: false, Provider: "github", Identity: "status-token"},
 		Telemetry: TelemetryConfig{Enabled: true},
 		Hub:       HubConfig{TokenIdentity: "hub-token", ListenAddr: ":8787"},
 	}
@@ -186,6 +194,12 @@ func (c *Config) normalize() {
 	if c.Git.RetainSnapshots == 0 {
 		c.Git.RetainSnapshots = 5
 	}
+	if c.Status.Provider == "" {
+		c.Status.Provider = c.Git.Provider
+	}
+	if c.Issues.Provider == "" {
+		c.Issues.Provider = c.Git.Provider
+	}
 }
 
 // Validate checks required invariants.
@@ -195,6 +209,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Git.Provider != "github" && c.Git.Provider != "gitlab" {
 		return fmt.Errorf("git_transport.provider must be github or gitlab, got %q", c.Git.Provider)
+	}
+	if c.Issues.Enabled && c.Issues.Provider != "github" {
+		return fmt.Errorf("issues.provider must be github when issues are enabled, got %q", c.Issues.Provider)
 	}
 	if !strings.HasPrefix(c.Git.ShadowNamespace, "refs/") {
 		return fmt.Errorf("git_transport.shadow_namespace must start with refs/, got %q", c.Git.ShadowNamespace)

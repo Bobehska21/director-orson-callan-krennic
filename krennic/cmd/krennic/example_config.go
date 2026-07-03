@@ -50,6 +50,11 @@ enabled  = false                 # opt-in publikace commit statusů
 provider = "github"
 identity = "status-token"        # keychain klíč, scope repo:status
 
+[issues]
+enabled  = false                 # opt-in GitHub issue při verdict=request-changes
+provider = "github"
+identity = "status-token"        # token musí umět zapisovat commit statusy i issues
+
 [telemetry]
 enabled       = true
 otlp_endpoint = ""               # volitelný OTLP collector (jinak jen lokální /metrics)

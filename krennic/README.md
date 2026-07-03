@@ -60,14 +60,40 @@ Výsledek statusu:
   publishing, nemá správný `status-token`, nebo ještě neposlal výsledek pro
   poslední commit PR; PR zůstane zablokované.
 
+### Automatické GitHub issues pro chyby
+Krennic umí při blokujícím AI review založit GitHub issue. Zapíná se samostatně:
+
+```toml
+[issues]
+enabled  = true
+provider = "github"
+identity = "status-token"
+```
+
+Použitý token musí mít kromě commit statusů také právo zapisovat issues. Když
+review skončí verdiktem `request-changes`, Krennic vytvoří issue se shrnutím,
+nálezy, odkazem na commit/change ID a labely:
+
+- `krennic`
+- `bug`
+- `backend`, pokud změněné soubory vypadají jako server/backend
+- `frontend`, pokud změněné soubory vypadají jako UI/frontend
+- `area-unknown`, když oblast nejde spolehlivě určit
+
+Klasifikace je heuristická: bere v úvahu přípony souborů (`.go`, `.py`, `.sql`
+pro backend; `.tsx`, `.jsx`, `.vue`, `.css`, `.html` pro frontend), jazyky a
+cesty jako `internal/`, `cmd/`, `api/`, `web/`, `ui/`, `client/`. Když změna
+zasáhne obě části, issue dostane oba labely.
+
 ### Běžný tok práce
 1. Vývojář si vytvoří větev z aktuálního `main`.
 2. Pracuje normálně lokálně; Krennic průběžně sleduje uložené změny.
 3. Krennic po debounce okně vytvoří stínový snapshot, spustí AI triage/review a
    publikuje `krennic/ai-review` na GitHub pro aktuální commit.
-4. Vývojář otevře Pull Request.
-5. GitHub Actions spustí `test`, `vet` a `build`.
-6. PR se může sloučit až po zeleném CI a zeleném `krennic/ai-review`.
+4. Pokud review vrátí `request-changes`, Krennic založí GitHub issue.
+5. Vývojář otevře Pull Request.
+6. GitHub Actions spustí `test`, `vet` a `build`.
+7. PR se může sloučit až po zeleném CI a zeleném `krennic/ai-review`.
 
 Pokud PR po pushi čeká na `krennic/ai-review`, nejdřív ověř, že Krennic na PC
 autora běží (`krennic status`), že daný repozitář patří do `watch_roots`, a že je

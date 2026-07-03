@@ -17,6 +17,7 @@ import (
 	"github.com/acme/krennic/internal/debounce"
 	"github.com/acme/krennic/internal/gitxport"
 	"github.com/acme/krennic/internal/hub"
+	"github.com/acme/krennic/internal/issues"
 	"github.com/acme/krennic/internal/model"
 	"github.com/acme/krennic/internal/redact"
 	"github.com/acme/krennic/internal/secrets"
@@ -40,6 +41,7 @@ type Agent struct {
 	watcher   *watcher.Watcher
 	deb       *debounce.Debouncer
 	publisher status.Publisher
+	reporter  issues.Reporter
 	hubClient *hub.Client
 
 	repos     []string
@@ -62,6 +64,7 @@ type Deps struct {
 	Builder   *change.Builder
 	Gateway   *ai.Gateway
 	Publisher status.Publisher
+	Reporter  issues.Reporter
 }
 
 // New constructs an Agent from config, resolving providers/secrets as needed.
@@ -104,6 +107,19 @@ func New(cfg config.Config, log *slog.Logger) (*Agent, error) {
 		}
 	}
 
+	var issueReporter issues.Reporter
+	if cfg.Issues.Enabled {
+		if tok, err := secrets.Resolve(cfg.Issues.Identity); err == nil {
+			if r, err := issues.New(cfg.Issues.Provider, tok); err == nil {
+				issueReporter = r
+			} else {
+				log.Warn("issue reporter init failed", "err", err)
+			}
+		} else {
+			log.Warn("issue token unavailable", "err", err)
+		}
+	}
+
 	// Central hub reporting (optional). When configured, every change is
 	// reported for team-wide, tamper-evident attribution.
 	var hubClient *hub.Client
@@ -118,7 +134,7 @@ func New(cfg config.Config, log *slog.Logger) (*Agent, error) {
 
 	return &Agent{
 		cfg: cfg, log: log, store: st, metrics: metrics,
-		builder: builder, gateway: gateway, publisher: pub, hubClient: hubClient,
+		builder: builder, gateway: gateway, publisher: pub, reporter: issueReporter, hubClient: hubClient,
 		repos: repos, remoteFor: remoteFor, sshKey: sshKey,
 		wake: make(chan struct{}, 64),
 	}, nil
@@ -288,6 +304,11 @@ func (a *Agent) processEvent(ev model.ChangeEvent) {
 	if a.publisher != nil {
 		if err := a.publisher.Publish(a.ctx, ev, res.Triage, res.Review); err != nil {
 			a.log.Warn("status publish failed", "change_id", ev.ChangeID, "err", err)
+		}
+	}
+	if a.reporter != nil && res.Review != nil && res.Review.Verdict == "request-changes" {
+		if err := a.reporter.Report(a.ctx, ev, res.Review); err != nil {
+			a.log.Warn("issue create failed", "change_id", ev.ChangeID, "err", err)
 		}
 	}
 	_ = a.store.Complete(ev.ChangeID)

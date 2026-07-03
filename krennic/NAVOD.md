@@ -108,13 +108,19 @@ V `config.toml` nastav:
 enabled  = true
 provider = "github"
 identity = "status-token"
+
+[issues]
+enabled  = true
+provider = "github"
+identity = "status-token"
 ```
 Potom ulož GitHub token:
 ```
 krennic keys set status-token
 ```
-Token musí umět zapisovat commit statusy do repozitáře. Díky tomu Krennic po
-kontrole pošle na GitHub výsledek `krennic/ai-review` pro aktuální commit.
+Token musí umět zapisovat commit statusy a issues do repozitáře. Díky tomu
+Krennic po kontrole pošle na GitHub výsledek `krennic/ai-review` pro aktuální
+commit. Když najde blokující chybu, založí GitHub issue.
 
 > Po každé změně `config.toml` restartuj službu, nebo prostě spusť `krennic run`.
 
@@ -254,7 +260,8 @@ GitHub ho pustí do `main` jen když projdou automatické kontroly:
 Ruční schvalování není potřeba. Krennic na počítači autora změny musí běžet,
 zkontrolovat změnu a poslat výsledek `krennic/ai-review` na GitHub pro poslední
 commit v PR. Když Krennic najde vážný problém, PR se nesloučí, dokud se kód
-neopraví a Krennic nepošle nový zelený stav.
+neopraví a Krennic nepošle nový zelený stav. Pokud je zapnuté `[issues]`, zároveň
+založí GitHub issue s labely `backend` nebo `frontend` podle změněných souborů.
 
 Jednoduché pravidlo pro každého vývojáře:
 
