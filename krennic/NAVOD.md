@@ -225,8 +225,8 @@ v týmovém přehledu.
 # Část C · Automatická synchronizace kódu s kolegou (git)
 
 > Pozn.: Tohle **není součást krennicu** – je to doplňkový pracovní postup přes
-> Claude Code hook (`.claude/hooks/auto-commit-push.sh` v kořeni repa). Krennic
-> změny jen **hodnotí**; přenos kódu dělá git.
+> Claude Code hooky (`.claude/hooks/` v kořeni repa). Krennic změny jen
+> **hodnotí**; přenos kódu dělá git.
 
 Aby si vývojáři nepřepisovali práci a měli pořád aktuální kód, po **každé
 dokončené práci** se automaticky provede:
@@ -239,8 +239,19 @@ dokončené práci** se automaticky provede:
 
 - Pořadí je zvolené tak, aby to **nikdy nespadlo a nic nepřepsalo**.
 - Když jsi jen povídal a nic neměnil → **neudělá se nic** (no-op).
+- Do zprávy commitu se přidá **seznam změněných souborů + diffstat**, aby další
+  vývojář / Claude viděl, čeho přesně se změna týkala (méně kolizí).
 - Při skutečném konfliktu ve stejných řádcích → **nic se nepřepíše**, jen se
   zobrazí upozornění a konflikt vyřešíš ručně (`git status`).
+
+Navíc dva ochranné hooky:
+
+- **Před prací** (`pre-work-fetch.sh`, UserPromptSubmit) — před každým příkazem
+  tiše ověří remote a když kolega mezitím pushnul, **upozorní** (a když máš čistý
+  strom, bezpečně stáhne). Vidíš, čeho se nedotýkat, dřív než začneš.
+- **Před pushem** (brána v `auto-commit-push.sh`) — než se kód pošle kolegovi,
+  spustí `go build ./...`. Když se **nepřeloží, nepushne** (commitne jen lokálně) —
+  ať kolegovi nepřistane rozbitý kód. Opraví se a nahraje při příštím sync.
 
 Aktivace je osobní (v `.claude/settings.local.json`, který je gitignored), takže
 se nikomu nevnucuje. Skript je ale ve verzi repa, takže ho má každý po naklonování
