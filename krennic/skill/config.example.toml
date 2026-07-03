@@ -1,0 +1,58 @@
+# Krennic — lokální AI code-review agent
+
+[agent]
+watch_roots    = ["~/code"]      # kořeny, pod kterými se auto-detekují git repozitáře
+debounce_ms    = 800             # okno pro sloučení bursty uložení
+max_wait_ms    = 5000            # strop: snapshot alespoň jednou za tuto dobu
+dashboard_addr = "127.0.0.1:7373"
+ai_workers     = 2               # paralelní AI workeři (respektuje rate limity)
+
+# Volitelný explicitní seznam repozitářů (jinak auto-discovery z watch_roots).
+# [[repos]]
+# path       = "~/code/payments-svc"
+# enabled    = true
+# remote_url = "git@github.com:acme/payments-svc.git"   # override ai-remote pro toto repo
+
+[redaction]
+deny       = [".env*", "*.pem", "*.key", "id_rsa*", "secrets/**"]
+scan_regex = true                # maskovat secret-like tokeny na zbývajících řádcích
+
+[git_transport]
+provider         = "github"      # github | gitlab
+remote_url       = ""            # ai-remote URL; prázdné = použije se origin repozitáře
+shadow_namespace = "refs/ai"     # stínové refy: refs/ai/<user>/<repo>/<branch>
+retain_snapshots = 5
+identity         = "git-shadow"  # název klíče v keychainu (shadow-write cred)
+ssh_key_path     = ""            # cesta k SSH klíči pro shadow push (volitelné)
+
+[ai.triage]
+provider = "anthropic"                       # anthropic | gemini | claude-cli
+model    = "claude-haiku-4-5-20251001"
+
+[ai.review]
+provider = "anthropic"
+model    = "claude-sonnet-5"
+
+[ai.routing]
+escalate_categories     = ["security", "logic", "test-gap"]
+escalate_line_threshold = 80
+# fallback = "gemini"            # provider použitý při chybě primárního
+
+[budget]
+daily_usd = 5.0                  # denní strop; po překročení jen triage
+
+[status]
+enabled  = false                 # opt-in publikace commit statusů
+provider = "github"
+identity = "status-token"        # keychain klíč, scope repo:status
+
+[telemetry]
+enabled       = true
+otlp_endpoint = ""               # volitelný OTLP collector (jinak jen lokální /metrics)
+
+[hub]
+url            = ""              # adresa centrálního hubu, např. "http://hub.firma.internal:8787"
+                                 # prázdné = reporting vypnutý (agent běží čistě lokálně)
+token_identity = "hub-token"     # název klíče v keychainu se sdíleným tokenem
+listen_addr    = ":8787"         # jen pro 'krennic hub' — kde server naslouchá
+db_path        = ""              # jen pro 'krennic hub' — cesta k audit DB (prázdné = výchozí)

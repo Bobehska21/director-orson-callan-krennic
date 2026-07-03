@@ -1,0 +1,14 @@
+[Unit]
+Description=Krennic — lokální AI code-review agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=__BIN__ run
+Restart=on-failure
+RestartSec=5
+# Least privilege: runs as the invoking user (systemd --user).
+
+[Install]
+WantedBy=default.target

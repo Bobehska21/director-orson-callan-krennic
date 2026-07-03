@@ -1,0 +1,9 @@
+# Build artefakty
+krennic/dist/
+*.exe
+
+# Lokální nastavení Claude Code
+.claude/settings.local.json
+
+# OS
+.DS_Store
