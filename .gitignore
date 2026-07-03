@@ -5,6 +5,7 @@ krennic/.gocache/
 
 # Lokální nastavení Claude Code
 .claude/settings.local.json
+.claude/*.lock
 
 # OS
 .DS_Store
