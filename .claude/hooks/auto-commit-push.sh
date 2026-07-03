@@ -40,10 +40,24 @@ sync="jen lokálně (chybí remote)"
 if git remote get-url origin >/dev/null 2>&1; then
   if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
     if git pull --rebase --quiet 2>/dev/null; then
-      if git push -q 2>/dev/null; then
-        sync="sync OK → origin/${branch} (stáhnuto + nahráno)"
+      # PRE-PUSH BRÁNA: než pošlu kód kolegovi, ověř, že se aspoň přeloží.
+      gate_ok=1; gate_msg=""
+      if command -v go >/dev/null 2>&1; then
+        gomod_dir="$(find . -maxdepth 2 -name go.mod 2>/dev/null | head -1 | sed 's#/go.mod$##')"
+        if [ -n "${gomod_dir}" ]; then
+          if ! ( cd "${gomod_dir}" && go build ./... ) >/dev/null 2>&1; then
+            gate_ok=0; gate_msg="go build selhal"
+          fi
+        fi
+      fi
+      if [ "${gate_ok}" -eq 1 ]; then
+        if git push -q 2>/dev/null; then
+          sync="sync OK → origin/${branch} (stáhnuto + nahráno)"
+        else
+          sync="⚠️ stáhnuto, ale push selhal"
+        fi
       else
-        sync="⚠️ stáhnuto, ale push selhal"
+        sync="⚠️ ${gate_msg} → NEpushnuto (commitnuto jen lokálně). Oprav a příště se nahraje."
       fi
     else
       git rebase --abort 2>/dev/null || true
