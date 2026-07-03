@@ -13,11 +13,77 @@ spouštělo CI. Krennic místo toho publikuje pracovní stav do odděleného nam
 přenese věrně (včetně untracked souborů), ale git stav vývojáře zůstane netknutý.
 Viz [`docs/git-transport.md`](docs/git-transport.md).
 
+## Týmový merge model: Krennic místo ruční kontroly
+`main` je chráněná stabilní větev. Vývojáři do ní neposílají změny přímo:
+každá změna jde přes krátkou feature/fix větev a Pull Request. Ruční approval
+není povinný; místo něj musí projít automatické kontroly:
+
+- `test` — `make test`
+- `vet` — `make vet`
+- `build` — `make build`
+- `krennic/ai-review` — verdikt Krennicu publikovaný jako GitHub commit status
+
+GitHub branch protection je nastavený tak, že PR do `main` nejde sloučit, dokud
+všechny tyto kontroly nejsou zelené. Krennic tedy není jen lokální rádce; v tomhle
+repu je součást merge brány.
+
+### Co musí dělat Krennic na každém PC
+Na počítači každého vývojáře musí běžet Krennic démon se zapnutým publikováním
+statusů:
+
+```toml
+[status]
+enabled  = true
+provider = "github"
+identity = "status-token"
+```
+
+Token `status-token` se ukládá do OS keychainu:
+
+```bash
+krennic keys set status-token
+```
+
+Token musí mít oprávnění zapisovat commit statusy do tohoto repozitáře
+(`repo:status` u classic PAT, případně fine-grained token s přístupem ke commit
+statuses). Krennic po analýze změny zavolá GitHub Statuses API a nastaví kontext
+`krennic/ai-review` na commit, který PR obsahuje. Pro branch protection je
+důležité, aby tento status existoval na **posledním commitu PR větve**; status na
+starším commitu nebo jen na stínovém refu `refs/ai/**` merge neodemkne.
+
+Výsledek statusu:
+
+- `success` — změna je podle Krennicu bezpečná pro merge, případně jen drobná.
+- `failure` — hlubší review našlo problém s verdiktem `request-changes`; PR se
+  nesloučí, dokud autor neopraví kód a Krennic nepublikuje nový zelený status.
+- chybějící status — Krennic neběží, nesleduje dané repo, nemá zapnutý status
+  publishing, nemá správný `status-token`, nebo ještě neposlal výsledek pro
+  poslední commit PR; PR zůstane zablokované.
+
+### Běžný tok práce
+1. Vývojář si vytvoří větev z aktuálního `main`.
+2. Pracuje normálně lokálně; Krennic průběžně sleduje uložené změny.
+3. Krennic po debounce okně vytvoří stínový snapshot, spustí AI triage/review a
+   publikuje `krennic/ai-review` na GitHub pro aktuální commit.
+4. Vývojář otevře Pull Request.
+5. GitHub Actions spustí `test`, `vet` a `build`.
+6. PR se může sloučit až po zeleném CI a zeleném `krennic/ai-review`.
+
+Pokud PR po pushi čeká na `krennic/ai-review`, nejdřív ověř, že Krennic na PC
+autora běží (`krennic status`), že daný repozitář patří do `watch_roots`, a že je
+zapnutý `[status] enabled = true`. Stav musí být publikovaný pro nejnovější SHA
+větve v PR.
+
+Tento model má dvě důležité vlastnosti: `main` se nerozbije přímým pushem a nikdo
+nemusí ručně kontrolovat každý PR. Pokud automatická AI kontrola neproběhne, merge
+se zastaví místo toho, aby nekontrolovaná změna prošla do stabilní větve.
+
 ## Rychlý start
 ```bash
 make build                       # nebo: go build -o dist/krennic ./cmd/krennic
 ./dist/krennic init-config      # vytvoř config, uprav watch_roots
 ./dist/krennic keys set anthropic   # API klíč (nebo v configu provider="claude-cli")
+./dist/krennic keys set status-token # GitHub token pro kontext krennic/ai-review
 ./dist/krennic doctor           # ověř git, keychain, providery, repozitáře
 ./dist/krennic run              # spusť démona (dashboard http://127.0.0.1:7373)
 ```
@@ -51,6 +117,8 @@ skill/scripts/install.ps1        # Windows SCM
   maskování tokenů), transparentně v `redacted_paths`.
 - **Durabilita** — SQLite fronta přežije reboot; přerušená práce se dokončí.
 - **Observabilita** — `/metrics` (Prometheus), dashboard, logy s `trace_id`.
+- **Merge gate** — GitHub status `krennic/ai-review` může být povinný check pro
+  PR, takže merge do `main` projde jen po automatické kontrole Krennicem.
 - **Bezpečnost** — oddělené identity (shadow-write, status, AI), tajemství jen v
   OS keychainu.
 
