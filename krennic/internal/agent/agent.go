@@ -48,6 +48,7 @@ type Agent struct {
 	remoteFor map[string]string
 	sshKey    string
 	lastHead  map[string]string
+	retryHead map[string]time.Time
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -136,7 +137,7 @@ func New(cfg config.Config, log *slog.Logger) (*Agent, error) {
 	return &Agent{
 		cfg: cfg, log: log, store: st, metrics: metrics,
 		builder: builder, gateway: gateway, publisher: pub, reporter: issueReporter, hubClient: hubClient,
-		repos: repos, remoteFor: remoteFor, sshKey: sshKey, lastHead: map[string]string{},
+		repos: repos, remoteFor: remoteFor, sshKey: sshKey, lastHead: map[string]string{}, retryHead: map[string]time.Time{},
 		wake: make(chan struct{}, 64),
 	}, nil
 }
@@ -275,16 +276,23 @@ func (a *Agent) headPoller() {
 }
 
 func (a *Agent) scanHeads(initial bool) {
+	now := time.Now()
 	for _, repoRoot := range a.repos {
 		g := gitxport.New(repoRoot)
 		head := g.HeadSHA()
 		if head == "" {
 			continue
 		}
-		if a.lastHead[repoRoot] == head {
+		a.mu.Lock()
+		last := a.lastHead[repoRoot]
+		retryAt := a.retryHead[repoRoot]
+		if last == head && (retryAt.IsZero() || now.Before(retryAt)) {
+			a.mu.Unlock()
 			continue
 		}
 		a.lastHead[repoRoot] = head
+		delete(a.retryHead, repoRoot)
+		a.mu.Unlock()
 		// On startup we still review non-main branch heads so a daemon restart can
 		// repair a missing PR status. Main/master are skipped to avoid spending AI
 		// budget on already-integrated baseline commits.
@@ -328,6 +336,28 @@ func isMainBranch(branch string) bool {
 	return branch == "main" || branch == "master"
 }
 
+func (a *Agent) scheduleHeadRetry(ev model.ChangeEvent) {
+	if !isCommitEvent(ev) || ev.Repo.LocalPath == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.retryHead[ev.Repo.LocalPath] = time.Now().Add(5 * time.Minute)
+}
+
+func (a *Agent) clearHeadRetry(ev model.ChangeEvent) {
+	if !isCommitEvent(ev) || ev.Repo.LocalPath == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.retryHead, ev.Repo.LocalPath)
+}
+
+func isCommitEvent(ev model.ChangeEvent) bool {
+	return ev.Repo.HeadSHA != "" && ev.Repo.HeadSHA == ev.Repo.ShadowSHA
+}
+
 // worker claims queued events and processes them.
 func (a *Agent) worker() {
 	defer a.wg.Done()
@@ -363,9 +393,11 @@ func (a *Agent) processEvent(ev model.ChangeEvent) {
 	if err != nil {
 		a.metrics.Inc(telemetry.ProviderErrors)
 		a.log.Warn("analysis failed", "change_id", ev.ChangeID, "err", err)
+		a.scheduleHeadRetry(ev)
 		_ = a.store.Fail(ev.ChangeID, err.Error())
 		return
 	}
+	a.clearHeadRetry(ev)
 	a.metrics.Observe(telemetry.ModelLatencyMS, float64(time.Since(tStart).Milliseconds()))
 	if res.Escalated {
 		a.metrics.Inc(telemetry.TriageEscalations)

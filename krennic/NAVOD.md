@@ -93,7 +93,10 @@ watch_roots = ["~/projekty"]
   (Gemini obdobně: `krennic keys set gemini`.)
 - Nemáš klíč, ale máš nástroj `claude`? V `config.toml` v sekcích
   `[ai.triage]` a `[ai.review]` změň `provider` na `"claude-cli"`. Žádný klíč pak
-  netřeba.
+  netřeba. Pro běh na pozadí ulož dlouhodobý token z `claude setup-token`:
+  ```
+  krennic keys set claude-oauth-token
+  ```
 
 **3) Ověř, že je vše připravené:**
 ```

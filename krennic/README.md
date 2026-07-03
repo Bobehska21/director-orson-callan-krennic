@@ -145,6 +145,9 @@ skill/scripts/install.ps1        # Windows SCM
 ## Klíčové vlastnosti
 - **Multi-provider AI** za jedním rozhraním: Anthropic Messages API, Gemini API,
   lokální Claude Code CLI (headless). Zaměnitelné bez zásahu do zbytku systému.
+- **Claude CLI na pozadí** — pokud používáš `provider="claude-cli"`, můžeš uložit
+  token z `claude setup-token` jako `claude-oauth-token`; služba ho předá do
+  `CLAUDE_CODE_OAUTH_TOKEN` bez plaintextu v configu.
 - **Dvoustupňové routování** — `trivial` se potlačí, eskaluje se jen relevantní
   (security/logic/test-gap nebo velké změny). Denní **budget gate**.
 - **Redakce** — secrets (`.env*`, `*.pem`, …) nikdy neopustí stroj (deny-list +
