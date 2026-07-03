@@ -1,4 +1,4 @@
-// Package issues opens tracker issues for blocking AI review findings.
+// Package issues syncs tracker issues for blocking AI review findings.
 package issues
 
 import (
@@ -16,7 +16,7 @@ import (
 	"github.com/acme/krennic/internal/model"
 )
 
-// Reporter creates issues for review results that should block a merge.
+// Reporter syncs issues for review results that should block a merge.
 type Reporter interface {
 	Report(ctx context.Context, ev model.ChangeEvent, rv *model.ReviewResult) error
 }
@@ -43,12 +43,25 @@ type githubReporter struct {
 }
 
 func (r *githubReporter) Report(ctx context.Context, ev model.ChangeEvent, rv *model.ReviewResult) error {
-	if rv == nil || rv.Verdict != "request-changes" {
+	if rv == nil {
 		return nil
 	}
 	owner, repo, err := parseGitHub(ev.Repo.Remote)
 	if err != nil {
 		return err
+	}
+	open, err := r.openIssueFor(ctx, owner, repo, ev)
+	if err != nil {
+		return err
+	}
+	if rv.Verdict != "request-changes" {
+		if open == nil {
+			return nil
+		}
+		return r.closeIssue(ctx, owner, repo, open.Number)
+	}
+	if open != nil {
+		return r.updateIssue(ctx, owner, repo, open.Number, ev, rv)
 	}
 	labels := labelsFor(ev)
 	for _, label := range labels {
@@ -65,6 +78,62 @@ func (r *githubReporter) Report(ctx context.Context, ev model.ChangeEvent, rv *m
 	req.Header.Set("accept", "application/vnd.github+json")
 	req.Header.Set("content-type", "application/json")
 	return do(r.client, req, "github issue create")
+}
+
+type githubIssue struct {
+	Number int    `json:"number"`
+	Body   string `json:"body"`
+}
+
+func (r *githubReporter) openIssueFor(ctx context.Context, owner, repo string, ev model.ChangeEvent) (*githubIssue, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues?state=open&labels=krennic&per_page=100", r.base, owner, repo)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	req.Header.Set("authorization", "Bearer "+r.token)
+	req.Header.Set("accept", "application/vnd.github+json")
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("github issue list failed: %d", resp.StatusCode)
+	}
+	var issues []githubIssue
+	if err := json.NewDecoder(resp.Body).Decode(&issues); err != nil {
+		return nil, err
+	}
+	marker := issueMarker(ev)
+	for _, issue := range issues {
+		if strings.Contains(issue.Body, marker) {
+			return &issue, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *githubReporter) updateIssue(ctx context.Context, owner, repo string, number int, ev model.ChangeEvent, rv *model.ReviewResult) error {
+	body, _ := json.Marshal(map[string]any{
+		"title":  titleFor(ev, rv),
+		"body":   bodyFor(ev, rv),
+		"labels": labelsFor(ev),
+		"state":  "open",
+	})
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d", r.base, owner, repo, number)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPatch, endpoint, bytes.NewReader(body))
+	req.Header.Set("authorization", "Bearer "+r.token)
+	req.Header.Set("accept", "application/vnd.github+json")
+	req.Header.Set("content-type", "application/json")
+	return do(r.client, req, "github issue update")
+}
+
+func (r *githubReporter) closeIssue(ctx context.Context, owner, repo string, number int) error {
+	body, _ := json.Marshal(map[string]string{"state": "closed"})
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d", r.base, owner, repo, number)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPatch, endpoint, bytes.NewReader(body))
+	req.Header.Set("authorization", "Bearer "+r.token)
+	req.Header.Set("accept", "application/vnd.github+json")
+	req.Header.Set("content-type", "application/json")
+	return do(r.client, req, "github issue close")
 }
 
 func (r *githubReporter) ensureLabel(ctx context.Context, owner, repo, label string) error {
@@ -100,6 +169,7 @@ func titleFor(ev model.ChangeEvent, rv *model.ReviewResult) string {
 
 func bodyFor(ev model.ChangeEvent, rv *model.ReviewResult) string {
 	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n\n", issueMarker(ev))
 	fmt.Fprintf(&b, "Krennic našel blokující problém v AI review.\n\n")
 	fmt.Fprintf(&b, "- Repo: `%s`\n", ev.Repo.Name)
 	fmt.Fprintf(&b, "- Branch: `%s`\n", ev.Repo.Branch)
@@ -132,6 +202,12 @@ func bodyFor(ev model.ChangeEvent, rv *model.ReviewResult) string {
 	}
 	fmt.Fprintf(&b, "\n---\nVytvořeno automaticky Krennicem pro verdikt `request-changes`.\n")
 	return b.String()
+}
+
+func issueMarker(ev model.ChangeEvent) string {
+	branch := strings.ReplaceAll(ev.Repo.Branch, "\n", " ")
+	repo := strings.ReplaceAll(ev.Repo.Name, "\n", " ")
+	return fmt.Sprintf("<!-- krennic:auto-issue repo=%q branch=%q -->", repo, branch)
 }
 
 func changedPaths(ev model.ChangeEvent) []string {

@@ -262,6 +262,7 @@ zkontrolovat změnu a poslat výsledek `krennic/ai-review` na GitHub pro posledn
 commit v PR. Když Krennic najde vážný problém, PR se nesloučí, dokud se kód
 neopraví a Krennic nepošle nový zelený stav. Pokud je zapnuté `[issues]`, zároveň
 založí GitHub issue s labely `backend` nebo `frontend` podle změněných souborů.
+Jakmile další review na stejné větvi projde, Krennic tu issue automaticky zavře.
 
 Jednoduché pravidlo pro každého vývojáře:
 

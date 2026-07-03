@@ -306,9 +306,9 @@ func (a *Agent) processEvent(ev model.ChangeEvent) {
 			a.log.Warn("status publish failed", "change_id", ev.ChangeID, "err", err)
 		}
 	}
-	if a.reporter != nil && res.Review != nil && res.Review.Verdict == "request-changes" {
+	if a.reporter != nil && res.Review != nil {
 		if err := a.reporter.Report(a.ctx, ev, res.Review); err != nil {
-			a.log.Warn("issue create failed", "change_id", ev.ChangeID, "err", err)
+			a.log.Warn("issue sync failed", "change_id", ev.ChangeID, "err", err)
 		}
 	}
 	_ = a.store.Complete(ev.ChangeID)

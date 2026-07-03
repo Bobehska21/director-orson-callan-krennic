@@ -33,6 +33,9 @@ func TestGitHubReporterCreatesIssueForRequestChanges(t *testing.T) {
 	var issueBody map[string]any
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		paths = append(paths, r.URL.Path)
+		if r.Method == http.MethodGet && r.URL.Path == "/repos/acme/payments/issues" {
+			return response(http.StatusOK, "[]"), nil
+		}
 		if r.Method == http.MethodPost && r.URL.Path == "/repos/acme/payments/labels" {
 			return response(http.StatusCreated, ""), nil
 		}
@@ -84,6 +87,38 @@ func TestGitHubReporterCreatesIssueForRequestChanges(t *testing.T) {
 	}
 	if paths[len(paths)-1] != "/repos/acme/payments/issues" {
 		t.Fatalf("last request = %q, want issue create", paths[len(paths)-1])
+	}
+}
+
+func TestGitHubReporterClosesIssueWhenReviewPasses(t *testing.T) {
+	var patchBody map[string]any
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet && r.URL.Path == "/repos/acme/payments/issues" {
+			return response(http.StatusOK, `[{"number":7,"body":"<!-- krennic:auto-issue repo=\"payments\" branch=\"feature-x\" -->"}]`), nil
+		}
+		if r.Method == http.MethodPatch && r.URL.Path == "/repos/acme/payments/issues/7" {
+			if err := json.NewDecoder(r.Body).Decode(&patchBody); err != nil {
+				t.Fatalf("decode patch body: %v", err)
+			}
+			return response(http.StatusOK, ""), nil
+		}
+		t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		return response(http.StatusNotFound, ""), nil
+	})}
+
+	r := &githubReporter{token: "tok", client: client, base: "https://api.github.test"}
+	ev := model.ChangeEvent{
+		Repo: model.Repo{
+			Name:   "payments",
+			Remote: "https://github.com/acme/payments.git",
+			Branch: "feature-x",
+		},
+	}
+	if err := r.Report(context.Background(), ev, &model.ReviewResult{Verdict: "pass"}); err != nil {
+		t.Fatalf("Report() error = %v", err)
+	}
+	if patchBody["state"] != "closed" {
+		t.Fatalf("state = %#v, want closed", patchBody["state"])
 	}
 }
 

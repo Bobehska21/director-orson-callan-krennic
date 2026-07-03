@@ -85,12 +85,18 @@ pro backend; `.tsx`, `.jsx`, `.vue`, `.css`, `.html` pro frontend), jazyky a
 cesty jako `internal/`, `cmd/`, `api/`, `web/`, `ui/`, `client/`. Když změna
 zasáhne obě části, issue dostane oba labely.
 
+Issue obsahuje skrytý Krennic marker s repo/branch identitou. Díky tomu Krennic
+nevytváří duplicitní issues pro stejnou větev: při dalším `request-changes`
+existující issue aktualizuje, a jakmile další review na stejné větvi skončí
+verdiktem `pass` nebo `comment`, otevřenou issue automaticky zavře.
+
 ### Běžný tok práce
 1. Vývojář si vytvoří větev z aktuálního `main`.
 2. Pracuje normálně lokálně; Krennic průběžně sleduje uložené změny.
 3. Krennic po debounce okně vytvoří stínový snapshot, spustí AI triage/review a
    publikuje `krennic/ai-review` na GitHub pro aktuální commit.
-4. Pokud review vrátí `request-changes`, Krennic založí GitHub issue.
+4. Pokud review vrátí `request-changes`, Krennic založí nebo aktualizuje GitHub
+   issue.
 5. Vývojář otevře Pull Request.
 6. GitHub Actions spustí `test`, `vet` a `build`.
 7. PR se může sloučit až po zeleném CI a zeleném `krennic/ai-review`.
