@@ -28,6 +28,8 @@ Změň soubor v hlídaném repu → `./dist/krennic recent` ukáže analýzu.
 skill/scripts/install.sh         # Linux systemd --user / macOS launchd
 skill/scripts/install.ps1        # Windows SCM
 ```
+> Šablony služby (`skill/service-templates/`) mají v `PATH` i `~/.local/bin`, aby
+> služba na pozadí našla lokální `claude` CLI — jinak by hlásila „no AI providers".
 
 ## CLI
 | Příkaz | Popis |
@@ -63,6 +65,13 @@ make dist        # cross-compile pro linux/darwin/windows × amd64/arm64
 Instalaci a provoz řídí Claude Code Skill v [`skill/SKILL.md`](skill/SKILL.md).
 Zkopíruj/symlinkni složku `skill/` do `~/.claude/skills/krennic/` pro použití
 jako `/krennic`.
+
+## Automatická git synchronizace (tento repo)
+Doplňkový Claude Code hook (`.claude/hooks/auto-commit-push.sh`) po každé dokončené
+práci provede `commit → pull --rebase → push` — nahraje tvoje změny a stáhne
+kolegovy, v pořadí bezpečném proti konfliktům. Není součást krennicu (ten změny jen
+hodnotí); aktivace je osobní přes `.claude/settings.local.json`. Detaily v
+[`NAVOD.md`](NAVOD.md) → *Část C*.
 
 ## Dokumentace
 - [`docs/architecture.md`](docs/architecture.md) — komponenty a datový tok

@@ -160,8 +160,11 @@ vynecháno, uvidíš u dané změny jako „redacted".
 ## Když něco nefunguje
 
 - **„Agent neběží"** → spusť `krennic run` nebo zkontroluj instalaci.
-- **„provider not configured"** → nemáš přístup k AI. Udělej
-  `krennic keys set anthropic`, nebo přepni `provider` na `"claude-cli"`.
+- **„provider not configured" / „no AI providers"** → nemáš přístup k AI. Udělej
+  `krennic keys set anthropic`, nebo přepni `provider` na `"claude-cli"`. Pokud to
+  hlásí **jen služba na pozadí** (ruční `krennic run` přitom funguje), jde o PATH –
+  služba musí vidět `claude` CLI. Šablony služby (`skill/service-templates/`) už
+  mají `~/.local/bin` v PATH; stačí přeinstalovat přes `install.sh`.
 - **Nic se nehodnotí** → `krennic doctor` a zkontroluj `watch_roots`.
 - **Moc utrácí** → sniž `daily_usd` v `config.toml`.
 
@@ -216,6 +219,32 @@ v týmovém přehledu.
 | Jen změny jednoho člověka | `krennic team --user alice` |
 | Jen změny v jednom projektu | `krennic team --repo platby` |
 | Ověřit, že s auditem nikdo nemanipuloval | `krennic audit verify` |
+
+---
+
+# Část C · Automatická synchronizace kódu s kolegou (git)
+
+> Pozn.: Tohle **není součást krennicu** – je to doplňkový pracovní postup přes
+> Claude Code hook (`.claude/hooks/auto-commit-push.sh` v kořeni repa). Krennic
+> změny jen **hodnotí**; přenos kódu dělá git.
+
+Aby si vývojáři nepřepisovali práci a měli pořád aktuální kód, po **každé
+dokončené práci** se automaticky provede:
+
+```
+1. commit          # nahraje tvoje změny do commitu
+2. pull --rebase   # stáhne kolegovy nejnovější změny (tvoje se přehrají navrch)
+3. push            # nahraje na GitHub
+```
+
+- Pořadí je zvolené tak, aby to **nikdy nespadlo a nic nepřepsalo**.
+- Když jsi jen povídal a nic neměnil → **neudělá se nic** (no-op).
+- Při skutečném konfliktu ve stejných řádcích → **nic se nepřepíše**, jen se
+  zobrazí upozornění a konflikt vyřešíš ručně (`git status`).
+
+Aktivace je osobní (v `.claude/settings.local.json`, který je gitignored), takže
+se nikomu nevnucuje. Skript je ale ve verzi repa, takže ho má každý po naklonování
+k dispozici. Zapnutí / vypnutí / přehled: příkaz `/hooks` v Claude Code.
 
 ---
 
