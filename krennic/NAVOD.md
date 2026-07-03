@@ -5,9 +5,10 @@ když někdo uloží soubor, nechá umělou inteligenci (Claude / Gemini) přeč
 změnu a říct, jestli je v pořádku. Volitelně se všechny změny sbíhají na jedno
 místo (hub), kde je přehledně vidět **kdo, co, kde a kdy** změnil.
 
-Návod má dvě části:
+Návod má tři části:
 - **Část A** – nastavení na počítači vývojáře (dělá se u každého).
 - **Část B** – týmový přehled na jednom místě (dělá se jednou pro celou firmu).
+- **Část C** – automatické sloučení přes GitHub bez ruční kontroly.
 
 ---
 
@@ -68,7 +69,7 @@ skill/scripts/install.sh
 Nastaví, aby se Krennic spouštěl sám na pozadí (na Windows: `install.ps1`).
 Od teď běží pořád, i po restartu počítače.
 
-## První nastavení (3 kroky)
+## První nastavení (4 kroky)
 
 **1) Vytvoř soubor s nastavením:**
 ```
@@ -99,6 +100,21 @@ watch_roots = ["~/projekty"]
 krennic doctor
 ```
 Vypíše seznam s ✓ (v pořádku) / ✗ (chybí). Když jsou důležité věci ✓, hotovo.
+
+**4) Zapni GitHub status pro automatické PR kontroly:**
+V `config.toml` nastav:
+```
+[status]
+enabled  = true
+provider = "github"
+identity = "status-token"
+```
+Potom ulož GitHub token:
+```
+krennic keys set status-token
+```
+Token musí umět zapisovat commit statusy do repozitáře. Díky tomu Krennic po
+kontrole pošle na GitHub výsledek `krennic/ai-review` pro aktuální commit.
 
 > Po každé změně `config.toml` restartuj službu, nebo prostě spusť `krennic run`.
 
@@ -166,6 +182,9 @@ vynecháno, uvidíš u dané změny jako „redacted".
   služba musí vidět `claude` CLI. Šablony služby (`skill/service-templates/`) už
   mají `~/.local/bin` v PATH; stačí přeinstalovat přes `install.sh`.
 - **Nic se nehodnotí** → `krennic doctor` a zkontroluj `watch_roots`.
+- **PR nejde sloučit, čeká na `krennic/ai-review`** → na počítači autora změny
+  neběží Krennic, nemá zapnutý `[status] enabled = true`, nebo chybí
+  `status-token`.
 - **Moc utrácí** → sniž `daily_usd` v `config.toml`.
 
 ---
@@ -222,7 +241,33 @@ v týmovém přehledu.
 
 ---
 
-# Část C · Automatická synchronizace kódu s kolegou (git)
+# Část C · Automatické sloučení přes GitHub
+
+Do `main` se neposílá přímo. Každý pracuje ve své větvi a otevře Pull Request.
+GitHub ho pustí do `main` jen když projdou automatické kontroly:
+
+- `test`
+- `vet`
+- `build`
+- `krennic/ai-review`
+
+Ruční schvalování není potřeba. Krennic na počítači autora změny musí běžet,
+zkontrolovat změnu a poslat výsledek `krennic/ai-review` na GitHub pro poslední
+commit v PR. Když Krennic najde vážný problém, PR se nesloučí, dokud se kód
+neopraví a Krennic nepošle nový zelený stav.
+
+Jednoduché pravidlo pro každého vývojáře:
+
+```
+1. pracuj ve vlastní větvi
+2. otevři Pull Request
+3. počkej na zelené automatické kontroly
+4. slouč do main
+```
+
+---
+
+# Část D · Automatická synchronizace kódu s kolegou (git)
 
 > Pozn.: Tohle **není součást krennicu** – je to doplňkový pracovní postup přes
 > Claude Code hooky (`.claude/hooks/` v kořeni repa). Krennic změny jen
