@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Stop hook: po dokončení práce automaticky commitne a pushne změny.
+# Stop hook: po dokončení práce automaticky nahraje svoje změny a stáhne kolegovy.
+# Pořadí: commit → pull --rebase (vezmi kolegovy nové změny) → push (nahraj svoje).
+# Rebase = moje commity se přehrají nad kolegovými → nikdy to nespadne a nic nepřepíše.
 # No-op, když v pracovním stromu nejsou žádné změny (např. jen konverzace).
 set -u
 
@@ -22,20 +24,32 @@ fi
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
 ts="$(date '+%Y-%m-%d %H:%M:%S')"
 
+# 1) Commitni svoje změny.
 git add -A
 git commit -q \
   -m "auto-commit: ${ts}" \
   -m "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" 2>/dev/null
 
-pushed="nepushnuto (chybí remote/upstream)"
+# 2) + 3) Synchronizace s remote: nejdřív stáhni kolegovy změny (rebase), pak nahraj svoje.
+sync="jen lokálně (chybí remote)"
 if git remote get-url origin >/dev/null 2>&1; then
   if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
-    git push -q 2>/dev/null && pushed="pushnuto → origin/${branch}"
+    if git pull --rebase --quiet 2>/dev/null; then
+      if git push -q 2>/dev/null; then
+        sync="sync OK → origin/${branch} (stáhnuto + nahráno)"
+      else
+        sync="⚠️ stáhnuto, ale push selhal"
+      fi
+    else
+      git rebase --abort 2>/dev/null || true
+      sync="⚠️ konflikt při stahování — nic nepřepsáno, vyřeš ručně (git status)"
+    fi
   else
-    git push -q -u origin "${branch}" 2>/dev/null && pushed="pushnuto → origin/${branch} (upstream nastaven)"
+    git push -q -u origin "${branch}" 2>/dev/null \
+      && sync="nahráno → origin/${branch} (upstream nastaven)"
   fi
 fi
 
 short="$(git rev-parse --short HEAD 2>/dev/null)"
-printf '{"systemMessage": "🔄 Auto-commit %s — %s"}' "${short}" "${pushed}"
+printf '{"systemMessage": "🔄 Auto-sync %s — %s"}' "${short}" "${sync}"
 exit 0
