@@ -17,7 +17,7 @@ import (
 )
 
 // knownSecrets are the credential names Krennic uses.
-var knownSecrets = []string{"anthropic", "gemini", "git-shadow", "status-token", "hub-token"}
+var knownSecrets = []string{"anthropic", "gemini", "claude-oauth-token", "git-shadow", "status-token", "hub-token"}
 
 func keysCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "keys", Short: "Správa tajemství v OS keychainu"}

@@ -40,6 +40,8 @@ func main() {
 		hubCmd(&cfgPath),
 		teamCmd(&cfgPath),
 		auditCmd(&cfgPath),
+		doneCmd(&cfgPath),
+		syncCmd(&cfgPath),
 		&cobra.Command{Use: "version", Short: "Vypíše verzi", Run: func(*cobra.Command, []string) { fmt.Println("krennic", version) }},
 	)
 

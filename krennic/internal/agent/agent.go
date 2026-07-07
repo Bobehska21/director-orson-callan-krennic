@@ -17,11 +17,13 @@ import (
 	"github.com/acme/krennic/internal/debounce"
 	"github.com/acme/krennic/internal/gitxport"
 	"github.com/acme/krennic/internal/hub"
+	"github.com/acme/krennic/internal/issues"
 	"github.com/acme/krennic/internal/model"
 	"github.com/acme/krennic/internal/redact"
 	"github.com/acme/krennic/internal/secrets"
 	"github.com/acme/krennic/internal/status"
 	"github.com/acme/krennic/internal/store"
+	"github.com/acme/krennic/internal/teamsync"
 	"github.com/acme/krennic/internal/telemetry"
 	"github.com/acme/krennic/internal/watcher"
 )
@@ -40,11 +42,15 @@ type Agent struct {
 	watcher   *watcher.Watcher
 	deb       *debounce.Debouncer
 	publisher status.Publisher
+	reporter  issues.Reporter
 	hubClient *hub.Client
+	teamSync  *teamsync.Manager
 
 	repos     []string
 	remoteFor map[string]string
 	sshKey    string
+	lastHead  map[string]string
+	retryHead map[string]time.Time
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -62,6 +68,7 @@ type Deps struct {
 	Builder   *change.Builder
 	Gateway   *ai.Gateway
 	Publisher status.Publisher
+	Reporter  issues.Reporter
 }
 
 // New constructs an Agent from config, resolving providers/secrets as needed.
@@ -104,6 +111,19 @@ func New(cfg config.Config, log *slog.Logger) (*Agent, error) {
 		}
 	}
 
+	var issueReporter issues.Reporter
+	if cfg.Issues.Enabled {
+		if tok, err := secrets.Resolve(cfg.Issues.Identity); err == nil {
+			if r, err := issues.New(cfg.Issues.Provider, tok); err == nil {
+				issueReporter = r
+			} else {
+				log.Warn("issue reporter init failed", "err", err)
+			}
+		} else {
+			log.Warn("issue token unavailable", "err", err)
+		}
+	}
+
 	// Central hub reporting (optional). When configured, every change is
 	// reported for team-wide, tamper-evident attribution.
 	var hubClient *hub.Client
@@ -115,11 +135,17 @@ func New(cfg config.Config, log *slog.Logger) (*Agent, error) {
 
 	repos := resolveRepos(cfg)
 	remoteFor := resolveRemotes(cfg, repos)
+	var teamSync *teamsync.Manager
+	if cfg.TeamSync.Enabled {
+		token, _ := secrets.Resolve(cfg.TeamSync.Identity)
+		teamSync = teamsync.New(cfg.TeamSync, repos, token)
+		log.Info("team sync enabled", "main", cfg.TeamSync.MainBranch, "repos", len(repos))
+	}
 
 	return &Agent{
 		cfg: cfg, log: log, store: st, metrics: metrics,
-		builder: builder, gateway: gateway, publisher: pub, hubClient: hubClient,
-		repos: repos, remoteFor: remoteFor, sshKey: sshKey,
+		builder: builder, gateway: gateway, publisher: pub, reporter: issueReporter, hubClient: hubClient,
+		teamSync: teamSync, repos: repos, remoteFor: remoteFor, sshKey: sshKey, lastHead: map[string]string{}, retryHead: map[string]time.Time{},
 		wake: make(chan struct{}, 64),
 	}, nil
 }
@@ -183,6 +209,12 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.wg.Add(1)
 		go a.outboxSender()
 	}
+	if a.teamSync != nil && a.teamSync.Enabled() {
+		a.wg.Add(1)
+		go a.teamSyncPoller()
+	}
+	a.wg.Add(1)
+	go a.headPoller()
 
 	// Start the local dashboard/control server.
 	srv := a.newHTTPServer()
@@ -199,6 +231,26 @@ func (a *Agent) Run(ctx context.Context) error {
 	_ = srv.Close()
 	a.wg.Wait()
 	return a.store.Close()
+}
+
+func (a *Agent) teamSyncPoller() {
+	defer a.wg.Done()
+	ticker := time.NewTicker(a.teamSync.Interval())
+	defer ticker.Stop()
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		case <-ticker.C:
+			for _, st := range a.teamSync.StatusAll(a.ctx) {
+				if st.Error != "" {
+					a.log.Warn("team sync fetch failed", "repo", st.Path, "err", st.Error)
+				} else if st.UpdatePending {
+					a.log.Info("team sync update pending", "repo", st.Path, "branch", st.Branch, "main", short(st.RemoteMain))
+				}
+			}
+		}
+	}
 }
 
 // handleChange runs on the debounced trigger: build event, dedup, enqueue.
@@ -236,6 +288,108 @@ func (a *Agent) handleChange(repoRoot string) {
 	}
 }
 
+func (a *Agent) headPoller() {
+	defer a.wg.Done()
+	interval := time.Duration(a.cfg.Agent.HeadPollMS) * time.Millisecond
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	a.scanHeads(true)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		case <-ticker.C:
+			a.scanHeads(false)
+		}
+	}
+}
+
+func (a *Agent) scanHeads(initial bool) {
+	now := time.Now()
+	for _, repoRoot := range a.repos {
+		g := gitxport.New(repoRoot)
+		head := g.HeadSHA()
+		if head == "" {
+			continue
+		}
+		a.mu.Lock()
+		last := a.lastHead[repoRoot]
+		retryAt := a.retryHead[repoRoot]
+		if last == head && (retryAt.IsZero() || now.Before(retryAt)) {
+			a.mu.Unlock()
+			continue
+		}
+		a.lastHead[repoRoot] = head
+		delete(a.retryHead, repoRoot)
+		a.mu.Unlock()
+		// On startup we still review non-main branch heads so a daemon restart can
+		// repair a missing PR status. Main/master are skipped to avoid spending AI
+		// budget on already-integrated baseline commits.
+		if initial && isMainBranch(g.CurrentBranch()) {
+			continue
+		}
+		a.handleHeadChange(repoRoot, head)
+	}
+}
+
+func (a *Agent) handleHeadChange(repoRoot, head string) {
+	if a.isPaused() {
+		return
+	}
+	ev, ok, err := a.builder.BuildCommit(repoRoot, head)
+	if err != nil {
+		a.log.Warn("build commit change failed", "repo", repoRoot, "head", head, "err", err)
+		return
+	}
+	if !ok {
+		return
+	}
+	if seen, _ := a.store.SeenRecently(ev.ContentHash, dedupWindow); seen {
+		return
+	}
+	if err := a.store.Enqueue(ev); err != nil {
+		a.log.Warn("enqueue commit failed", "err", err)
+		return
+	}
+	a.metrics.Inc(telemetry.ChangesProcessed)
+	a.updateQueueDepth()
+	a.log.Info("commit queued", "repo", ev.Repo.Name, "branch", ev.Repo.Branch,
+		"head", short(head), "change_id", ev.ChangeID, "trace_id", ev.TraceID)
+	select {
+	case a.wake <- struct{}{}:
+	default:
+	}
+}
+
+func isMainBranch(branch string) bool {
+	return branch == "main" || branch == "master"
+}
+
+func (a *Agent) scheduleHeadRetry(ev model.ChangeEvent) {
+	if !isCommitEvent(ev) || ev.Repo.LocalPath == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.retryHead[ev.Repo.LocalPath] = time.Now().Add(5 * time.Minute)
+}
+
+func (a *Agent) clearHeadRetry(ev model.ChangeEvent) {
+	if !isCommitEvent(ev) || ev.Repo.LocalPath == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.retryHead, ev.Repo.LocalPath)
+}
+
+func isCommitEvent(ev model.ChangeEvent) bool {
+	return ev.Repo.HeadSHA != "" && ev.Repo.HeadSHA == ev.Repo.ShadowSHA
+}
+
 // worker claims queued events and processes them.
 func (a *Agent) worker() {
 	defer a.wg.Done()
@@ -271,9 +425,11 @@ func (a *Agent) processEvent(ev model.ChangeEvent) {
 	if err != nil {
 		a.metrics.Inc(telemetry.ProviderErrors)
 		a.log.Warn("analysis failed", "change_id", ev.ChangeID, "err", err)
+		a.scheduleHeadRetry(ev)
 		_ = a.store.Fail(ev.ChangeID, err.Error())
 		return
 	}
+	a.clearHeadRetry(ev)
 	a.metrics.Observe(telemetry.ModelLatencyMS, float64(time.Since(tStart).Milliseconds()))
 	if res.Escalated {
 		a.metrics.Inc(telemetry.TriageEscalations)
@@ -288,6 +444,11 @@ func (a *Agent) processEvent(ev model.ChangeEvent) {
 	if a.publisher != nil {
 		if err := a.publisher.Publish(a.ctx, ev, res.Triage, res.Review); err != nil {
 			a.log.Warn("status publish failed", "change_id", ev.ChangeID, "err", err)
+		}
+	}
+	if a.reporter != nil && res.Review != nil {
+		if err := a.reporter.Report(a.ctx, ev, res.Review); err != nil {
+			a.log.Warn("issue sync failed", "change_id", ev.ChangeID, "err", err)
 		}
 	}
 	_ = a.store.Complete(ev.ChangeID)

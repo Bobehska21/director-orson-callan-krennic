@@ -1,9 +1,11 @@
 # Build artefakty
 krennic/dist/
+krennic/.gocache/
 *.exe
 
 # Lokální nastavení Claude Code
 .claude/settings.local.json
+.claude/*.lock
 
 # OS
 .DS_Store

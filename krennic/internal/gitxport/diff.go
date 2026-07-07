@@ -11,9 +11,9 @@ import (
 
 // DiffOptions control diff granularity for the AI event.
 type DiffOptions struct {
-	ContextLines     int
-	InterHunkContext int
-	FunctionContext  bool
+	ContextLines      int
+	InterHunkContext  int
+	FunctionContext   bool
 	MaxUntrackedLines int // cap synthetic untracked-file hunks
 }
 
@@ -60,6 +60,63 @@ func (g *Git) WorkingTreeDiff(opts DiffOptions, deny DenyFunc, mask func(string)
 		}
 	}
 
+	res = parseDiff(raw, deny, mask)
+
+	// Untracked files: render as synthetic new-file hunks.
+	if others, err := g.run("ls-files", "--others", "--exclude-standard"); err == nil {
+		for _, path := range splitLines(others) {
+			if deny != nil && deny(path) {
+				continue
+			}
+			hunk, added, truncated, ok := g.untrackedHunk(path, opts, mask)
+			if !ok {
+				continue
+			}
+			res.Hunks = append(res.Hunks, hunk)
+			res.LinesAdded += added
+			res.Truncated = res.Truncated || truncated
+			if !containsString(res.ChangedFiles, path) {
+				res.ChangedFiles = append(res.ChangedFiles, path)
+			}
+			if l := languageOf(path); l != "" {
+				if !containsString(res.Languages, l) {
+					res.Languages = append(res.Languages, l)
+				}
+			}
+		}
+	}
+
+	return res, nil
+}
+
+// CommitDiff computes the hunk-level diff introduced by commit-ish sha.
+func (g *Git) CommitDiff(sha string, opts DiffOptions, deny DenyFunc, mask func(string) string) (DiffResult, error) {
+	args := []string{"show", "--no-color", "--format=",
+		fmt.Sprintf("-U%d", opts.ContextLines),
+		fmt.Sprintf("--inter-hunk-context=%d", opts.InterHunkContext),
+	}
+	if opts.FunctionContext {
+		args = append(args, "--function-context")
+	}
+	args = append(args, sha)
+	raw, err := g.run(args...)
+	if err != nil {
+		return DiffResult{}, err
+	}
+	return parseDiff(raw, deny, mask), nil
+}
+
+// ChangedPathsInCommit returns repo-relative paths touched by a commit.
+func (g *Git) ChangedPathsInCommit(sha string) []string {
+	out, err := g.run("diff-tree", "--no-commit-id", "--name-only", "-r", sha)
+	if err != nil {
+		return nil
+	}
+	return splitLines(out)
+}
+
+func parseDiff(raw string, deny DenyFunc, mask func(string) string) DiffResult {
+	var res DiffResult
 	langSet := map[string]bool{}
 	fileSet := map[string]bool{}
 	for _, fd := range splitFileDiffs(raw) {
@@ -87,34 +144,22 @@ func (g *Git) WorkingTreeDiff(opts DiffOptions, deny DenyFunc, mask func(string)
 			langSet[lang] = true
 		}
 	}
-
-	// Untracked files: render as synthetic new-file hunks.
-	if others, err := g.run("ls-files", "--others", "--exclude-standard"); err == nil {
-		for _, path := range splitLines(others) {
-			if deny != nil && deny(path) {
-				continue
-			}
-			hunk, added, truncated, ok := g.untrackedHunk(path, opts, mask)
-			if !ok {
-				continue
-			}
-			res.Hunks = append(res.Hunks, hunk)
-			res.LinesAdded += added
-			res.Truncated = res.Truncated || truncated
-			fileSet[path] = true
-			if l := languageOf(path); l != "" {
-				langSet[l] = true
-			}
-		}
-	}
-
 	for f := range fileSet {
 		res.ChangedFiles = append(res.ChangedFiles, f)
 	}
 	for l := range langSet {
 		res.Languages = append(res.Languages, l)
 	}
-	return res, nil
+	return res
+}
+
+func containsString(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *Git) emptyTree() string {

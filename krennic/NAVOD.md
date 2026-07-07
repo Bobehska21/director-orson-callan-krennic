@@ -5,9 +5,10 @@ když někdo uloží soubor, nechá umělou inteligenci (Claude / Gemini) přeč
 změnu a říct, jestli je v pořádku. Volitelně se všechny změny sbíhají na jedno
 místo (hub), kde je přehledně vidět **kdo, co, kde a kdy** změnil.
 
-Návod má dvě části:
+Návod má tři části:
 - **Část A** – nastavení na počítači vývojáře (dělá se u každého).
 - **Část B** – týmový přehled na jednom místě (dělá se jednou pro celou firmu).
+- **Část C** – automatické sloučení přes GitHub bez ruční kontroly.
 
 ---
 
@@ -68,7 +69,7 @@ skill/scripts/install.sh
 Nastaví, aby se Krennic spouštěl sám na pozadí (na Windows: `install.ps1`).
 Od teď běží pořád, i po restartu počítače.
 
-## První nastavení (3 kroky)
+## První nastavení (4 kroky)
 
 **1) Vytvoř soubor s nastavením:**
 ```
@@ -92,13 +93,37 @@ watch_roots = ["~/projekty"]
   (Gemini obdobně: `krennic keys set gemini`.)
 - Nemáš klíč, ale máš nástroj `claude`? V `config.toml` v sekcích
   `[ai.triage]` a `[ai.review]` změň `provider` na `"claude-cli"`. Žádný klíč pak
-  netřeba.
+  netřeba. Pro běh na pozadí ulož dlouhodobý token z `claude setup-token`:
+  ```
+  krennic keys set claude-oauth-token
+  ```
 
 **3) Ověř, že je vše připravené:**
 ```
 krennic doctor
 ```
 Vypíše seznam s ✓ (v pořádku) / ✗ (chybí). Když jsou důležité věci ✓, hotovo.
+
+**4) Zapni GitHub status pro automatické PR kontroly:**
+V `config.toml` nastav:
+```
+[status]
+enabled  = true
+provider = "github"
+identity = "status-token"
+
+[issues]
+enabled  = true
+provider = "github"
+identity = "status-token"
+```
+Potom ulož GitHub token:
+```
+krennic keys set status-token
+```
+Token musí umět zapisovat commit statusy a issues do repozitáře. Díky tomu
+Krennic po kontrole pošle na GitHub výsledek `krennic/ai-review` pro aktuální
+commit. Když najde blokující chybu, založí GitHub issue.
 
 > Po každé změně `config.toml` restartuj službu, nebo prostě spusť `krennic run`.
 
@@ -166,6 +191,9 @@ vynecháno, uvidíš u dané změny jako „redacted".
   služba musí vidět `claude` CLI. Šablony služby (`skill/service-templates/`) už
   mají `~/.local/bin` v PATH; stačí přeinstalovat přes `install.sh`.
 - **Nic se nehodnotí** → `krennic doctor` a zkontroluj `watch_roots`.
+- **PR nejde sloučit, čeká na `krennic/ai-review`** → na počítači autora změny
+  neběží Krennic, nemá zapnutý `[status] enabled = true`, nebo chybí
+  `status-token`.
 - **Moc utrácí** → sniž `daily_usd` v `config.toml`.
 
 ---
@@ -222,40 +250,88 @@ v týmovém přehledu.
 
 ---
 
-# Část C · Automatická synchronizace kódu s kolegou (git)
+# Část C · Automatické sloučení přes GitHub
 
-> Pozn.: Tohle **není součást krennicu** – je to doplňkový pracovní postup přes
-> Claude Code hooky (`.claude/hooks/` v kořeni repa). Krennic změny jen
-> **hodnotí**; přenos kódu dělá git.
+Do `main` se neposílá přímo. Každý pracuje ve své větvi a otevře Pull Request.
+GitHub ho pustí do `main` jen když projdou automatické kontroly:
 
-Aby si vývojáři nepřepisovali práci a měli pořád aktuální kód, po **každé
-dokončené práci** se automaticky provede:
+- `test`
+- `vet`
+- `build`
+- `krennic/ai-review`
+
+Ruční schvalování není potřeba. Krennic na počítači autora změny musí běžet,
+zkontrolovat změnu a poslat výsledek `krennic/ai-review` na GitHub pro poslední
+commit v PR. Když Krennic najde vážný problém, PR se nesloučí, dokud se kód
+neopraví a Krennic nepošle nový zelený stav. Pokud je zapnuté `[issues]`, zároveň
+založí GitHub issue s labely `backend` nebo `frontend` podle změněných souborů.
+Jakmile další review na stejné větvi projde, Krennic tu issue automaticky zavře.
+Nové commity hlídá automaticky, takže po commitu/pushi pošle status na správný
+poslední commit PR.
+
+Jednoduché pravidlo pro každého vývojáře:
 
 ```
-1. commit          # nahraje tvoje změny do commitu
-2. pull --rebase   # stáhne kolegovy nejnovější změny (tvoje se přehrají navrch)
-3. push            # nahraje na GitHub
+1. pracuj ve vlastní větvi
+2. otevři Pull Request
+3. počkej na zelené automatické kontroly
+4. slouč do main
 ```
 
-- Pořadí je zvolené tak, aby to **nikdy nespadlo a nic nepřepsalo**.
-- Když jsi jen povídal a nic neměnil → **neudělá se nic** (no-op).
-- Do zprávy commitu se přidá **seznam změněných souborů + diffstat**, aby další
-  vývojář / Claude viděl, čeho přesně se změna týkala (méně kolizí).
-- Při skutečném konfliktu ve stejných řádcích → **nic se nepřepíše**, jen se
-  zobrazí upozornění a konflikt vyřešíš ručně (`git status`).
+---
 
-Navíc dva ochranné hooky:
+# Část D · Týmová synchronizace kódu s GitHubem
 
-- **Před prací** (`pre-work-fetch.sh`, UserPromptSubmit) — před každým příkazem
-  tiše ověří remote a když kolega mezitím pushnul, **upozorní** (a když máš čistý
-  strom, bezpečně stáhne). Vidíš, čeho se nedotýkat, dřív než začneš.
-- **Před pushem** (brána v `auto-commit-push.sh`) — než se kód pošle kolegovi,
-  spustí `go build ./...`. Když se **nepřeloží, nepushne** (commitne jen lokálně) —
-  ať kolegovi nepřistane rozbitý kód. Opraví se a nahraje při příštím sync.
+Volitelný režim `[team_sync]` řeší rychlé sdílení změn bez toho, aby komukoliv
+přepisoval rozepsaný kód pod rukama.
 
-Aktivace je osobní (v `.claude/settings.local.json`, který je gitignored), takže
-se nikomu nevnucuje. Skript je ale ve verzi repa, takže ho má každý po naklonování
-k dispozici. Zapnutí / vypnutí / přehled: příkaz `/hooks` v Claude Code.
+V `config.toml`:
+
+```
+[team_sync]
+enabled           = true
+main_branch       = "main"
+fetch_interval_ms = 300000
+branch_prefix     = "krennic/done"
+provider          = "github"
+identity          = "status-token"
+auto_merge        = true
+```
+
+Co se děje na pozadí:
+
+```
+1. démon pravidelně fetchuje origin/main
+2. nikdy automaticky nemění rozdělaný pracovní strom
+3. když je na GitHubu novější main, ukáže upozornění ve statusu a dashboardu
+```
+
+Když vývojář nebo AI dokončí malou podúlohu:
+
+```
+krennic done --message "stručný popis změny"
+```
+
+Krennic potom:
+
+```
+1. ověří, že pracovní větev vychází z aktuálního origin/main
+2. vytvoří krátkou větev s prefixem krennic/done
+3. commitne lokální změny
+4. spustí validaci podle projektu (make, npm, go, cargo, pytest)
+5. pushne větev
+6. otevře Pull Request do main
+7. zapne GitHub auto-merge, takže merge proběhne až po zelených kontrolách
+```
+
+Když je lokální `main` čistý a chceš si novou verzi stáhnout ručně:
+
+```
+krennic sync
+```
+
+Pokud máš rozdělanou práci, `krennic sync` ji nepřepíše. Nejdřív práci dokonči,
+nebo ji ručně odlož podle běžného Git workflow.
 
 ---
 

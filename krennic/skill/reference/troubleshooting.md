@@ -21,6 +21,9 @@
 ## Shadow push selhává
 - `krennic doctor` ukáže ai-remote URL. Prázdné = použije se origin repozitáře;
   pokud origin není, push se přeskočí (analýza běží dál).
+- Pokud konkrétní repo nesmí používat lidský `origin` pro Krennic shadow push,
+  nastav mu v configu vlastní blok `[[repos]]` s `path` a `remote_url`. Per-repo
+  hodnota má přednost před globálním `[git_transport].remote_url`.
 - Ověř přístup shadow identity: `GIT_SSH_COMMAND="ssh -i <klíč>" git ls-remote <url>`.
 - Server musí povolit push do `refs/ai/**` pro shadow identitu.
 
@@ -28,6 +31,13 @@
 - `[budget] daily_usd` omezí denní útratu (po překročení jen triage).
 - Zpřísni eskalaci: zvyš `escalate_line_threshold`, zúž `escalate_categories`.
 - Použij levnější triage model / `provider = "claude-cli"`.
+
+## `krennic done` odmítá dokončit změnu
+- Čistý strom = není co dokončit.
+- Větev nevychází z posledního `origin/main`; dokonči nebo odlož rozdělanou
+  práci, ručně srovnej větev s main a spusť `krennic done` znovu.
+- Selhala validace; příkaz vypíše cestu k logu.
+- Token v `team_sync.identity` musí umět vytvořit PR a zapnout auto-merge.
 
 ## Reset stavu
 - Fronta a výsledky jsou v SQLite vedle configu (`krennic.db`). Zastav službu,

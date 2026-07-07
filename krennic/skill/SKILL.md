@@ -65,6 +65,8 @@ status.
 
 ## Běžná správa
 - `krennic status` — stav, fronta, náklady dnes.
+- `krennic sync` — stáhne pending `main`, jen když je worktree čistý.
+- `krennic done --message "..."` — bezpečně dokončí podúlohu přes větev, validaci, PR a auto-merge.
 - `krennic recent` — poslední analýzy.
 - `krennic show <change_id>` — detail nálezů.
 - `krennic pause 1h` / `krennic resume` — dočasně vypnout.
@@ -101,6 +103,8 @@ Uprav config (`krennic init-config` ukáže cestu; typicky
 - `[budget] daily_usd` — denní strop; po překročení jen triage.
 - `[redaction] deny` — vyloučené cesty.
 - `[status] enabled` — opt-in publikace commit statusů.
+- `[team_sync] enabled` — periodický fetch hlavní větve a `krennic done`
+  workflow pro krátkou větev, validaci, PR a auto-merge.
 Po změně restartuj službu (viz `scripts/install.sh` výstup) nebo `krennic run`.
 
 ## Reference

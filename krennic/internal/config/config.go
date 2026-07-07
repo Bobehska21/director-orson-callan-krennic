@@ -22,6 +22,8 @@ type Config struct {
 	AI        AIConfig        `toml:"ai"`
 	Budget    BudgetConfig    `toml:"budget"`
 	Status    StatusConfig    `toml:"status"`
+	Issues    IssuesConfig    `toml:"issues"`
+	TeamSync  TeamSyncConfig  `toml:"team_sync"`
 	Telemetry TelemetryConfig `toml:"telemetry"`
 	Hub       HubConfig       `toml:"hub"`
 }
@@ -42,6 +44,7 @@ type AgentConfig struct {
 	MaxWaitMS     int      `toml:"max_wait_ms"`
 	DashboardAddr string   `toml:"dashboard_addr"`
 	AIWorkers     int      `toml:"ai_workers"`
+	HeadPollMS    int      `toml:"head_poll_ms"`
 }
 
 type RepoConfig struct {
@@ -93,6 +96,22 @@ type StatusConfig struct {
 	Identity string `toml:"identity"` // keychain key name, repo:status scope
 }
 
+type IssuesConfig struct {
+	Enabled  bool   `toml:"enabled"`
+	Provider string `toml:"provider"`
+	Identity string `toml:"identity"` // keychain key name, issues:write scope
+}
+
+type TeamSyncConfig struct {
+	Enabled         bool   `toml:"enabled"`
+	MainBranch      string `toml:"main_branch"`
+	FetchIntervalMS int    `toml:"fetch_interval_ms"`
+	BranchPrefix    string `toml:"branch_prefix"`
+	Provider        string `toml:"provider"`
+	Identity        string `toml:"identity"`
+	AutoMerge       bool   `toml:"auto_merge"`
+}
+
 type TelemetryConfig struct {
 	Enabled      bool   `toml:"enabled"`
 	OTLPEndpoint string `toml:"otlp_endpoint"`
@@ -125,6 +144,7 @@ func Default() Config {
 			MaxWaitMS:     5000,
 			DashboardAddr: "127.0.0.1:7373",
 			AIWorkers:     2,
+			HeadPollMS:    5000,
 		},
 		Redaction: RedactionConfig{
 			Deny:      []string{".env*", "*.pem", "*.key", "id_rsa*", "secrets/**"},
@@ -146,6 +166,8 @@ func Default() Config {
 		},
 		Budget:    BudgetConfig{DailyUSD: 5.0},
 		Status:    StatusConfig{Enabled: false, Provider: "github", Identity: "status-token"},
+		Issues:    IssuesConfig{Enabled: false, Provider: "github", Identity: "status-token"},
+		TeamSync:  TeamSyncConfig{Enabled: false, MainBranch: "main", FetchIntervalMS: 300000, BranchPrefix: "krennic/done", Provider: "github", Identity: "status-token", AutoMerge: true},
 		Telemetry: TelemetryConfig{Enabled: true},
 		Hub:       HubConfig{TokenIdentity: "hub-token", ListenAddr: ":8787"},
 	}
@@ -180,11 +202,35 @@ func (c *Config) normalize() {
 	if c.Agent.AIWorkers == 0 {
 		c.Agent.AIWorkers = 2
 	}
+	if c.Agent.HeadPollMS == 0 {
+		c.Agent.HeadPollMS = 5000
+	}
 	if c.Git.ShadowNamespace == "" {
 		c.Git.ShadowNamespace = "refs/ai"
 	}
 	if c.Git.RetainSnapshots == 0 {
 		c.Git.RetainSnapshots = 5
+	}
+	if c.Status.Provider == "" {
+		c.Status.Provider = c.Git.Provider
+	}
+	if c.Issues.Provider == "" {
+		c.Issues.Provider = c.Git.Provider
+	}
+	if c.TeamSync.MainBranch == "" {
+		c.TeamSync.MainBranch = "main"
+	}
+	if c.TeamSync.FetchIntervalMS == 0 {
+		c.TeamSync.FetchIntervalMS = 300000
+	}
+	if c.TeamSync.BranchPrefix == "" {
+		c.TeamSync.BranchPrefix = "krennic/done"
+	}
+	if c.TeamSync.Provider == "" {
+		c.TeamSync.Provider = "github"
+	}
+	if c.TeamSync.Identity == "" {
+		c.TeamSync.Identity = "status-token"
 	}
 }
 
@@ -195,6 +241,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Git.Provider != "github" && c.Git.Provider != "gitlab" {
 		return fmt.Errorf("git_transport.provider must be github or gitlab, got %q", c.Git.Provider)
+	}
+	if c.Issues.Enabled && c.Issues.Provider != "github" {
+		return fmt.Errorf("issues.provider must be github when issues are enabled, got %q", c.Issues.Provider)
+	}
+	if c.TeamSync.Enabled && c.TeamSync.Provider != "github" {
+		return fmt.Errorf("team_sync.provider must be github when team sync is enabled, got %q", c.TeamSync.Provider)
 	}
 	if !strings.HasPrefix(c.Git.ShadowNamespace, "refs/") {
 		return fmt.Errorf("git_transport.shadow_namespace must start with refs/, got %q", c.Git.ShadowNamespace)

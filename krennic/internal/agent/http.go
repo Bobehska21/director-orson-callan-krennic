@@ -27,6 +27,7 @@ func (a *Agent) newHTTPServer() *http.Server {
 			"paused":       a.isPaused(),
 			"paused_until": a.pausedUntilStr(),
 			"repos":        a.repos,
+			"team_sync":    a.teamSyncStatus(r),
 			"queue_depth":  depth,
 			"outbox_depth": outbox,
 			"hub_enabled":  a.hubClient != nil,
@@ -93,6 +94,16 @@ func (a *Agent) newHTTPServer() *http.Server {
 	}
 }
 
+func (a *Agent) teamSyncStatus(r *http.Request) any {
+	if a.teamSync == nil || !a.teamSync.Enabled() {
+		return map[string]any{"enabled": false}
+	}
+	return map[string]any{
+		"enabled": true,
+		"repos":   a.teamSync.StatusAll(r.Context()),
+	}
+}
+
 func (a *Agent) pausedUntilStr() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -123,6 +134,12 @@ const dashboardHTML = `<!doctype html>
  .card{background:#171a21;border:1px solid #262a33;border-radius:8px;padding:12px 16px;min-width:130px}
  .card .n{font-size:22px;font-weight:600}
  .card .l{font-size:12px;color:#8a919e}
+ .team{display:none;margin-bottom:24px;background:#171a21;border:1px solid #262a33;border-radius:8px;padding:12px 16px}
+ .team h2{font-size:14px;margin:0 0 8px}
+ .team .repo{display:flex;gap:8px;justify-content:space-between;border-top:1px solid #262a33;padding:8px 0}
+ .team .repo:first-of-type{border-top:0}
+ .team .muted{color:#8a919e}
+ .team .pending{color:#e2c67e}.team .error{color:#ff6b6b}
  table{width:100%;border-collapse:collapse}
  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #262a33;font-size:13px;vertical-align:top}
  th{color:#8a919e;font-weight:500}
@@ -136,6 +153,7 @@ const dashboardHTML = `<!doctype html>
  <span style="margin-left:auto;color:#8a919e" id="spend"></span></header>
 <main>
  <div class="stats" id="stats"></div>
+ <section class="team" id="team-sync"><h2>Team sync</h2><div id="team-sync-rows"></div></section>
  <table><thead><tr><th>Čas</th><th>Repo / branch</th><th>Soubory</th><th>Triage</th><th>Verdikt</th><th>Nálezy</th></tr></thead>
  <tbody id="rows"></tbody></table>
 </main>
@@ -153,6 +171,20 @@ async function refresh(){
    stat('Eskalace',Math.round(m.krennic_triage_escalations_total||0))+
    stat('Push chyby',Math.round(m.krennic_shadow_push_failures_total||0))+
    stat('Ø latence AI',Math.round(m.krennic_model_latency_ms_avg||0)+' ms');
+ const team=document.getElementById('team-sync');
+ const teamRows=document.getElementById('team-sync-rows');
+ if(s.team_sync&&s.team_sync.enabled){
+   team.style.display='block';
+   teamRows.innerHTML=(s.team_sync.repos||[]).map(r=>{
+     let cls='',state='aktuální';
+     if(r.update_pending){cls='pending';state='nová verze čeká'}
+     if(r.error){cls='error';state='chyba: '+r.error}
+     const dirty=r.dirty?' rozpracováno':'';
+     return '<div class="repo"><div>'+r.path+'<br><span class="muted">'+r.branch+dirty+'</span></div><div class="'+cls+'">'+state+'</div></div>';
+   }).join('');
+ } else {
+   team.style.display='none';
+ }
  const recs=await (await fetch('/api/recent?limit=40')).json()||[];
  document.getElementById('rows').innerHTML=recs.map(r=>{
    const e=r.event,t=r.triage,v=r.review;

@@ -6,6 +6,7 @@ debounce_ms    = 800             # okno pro sloučení bursty uložení
 max_wait_ms    = 5000            # strop: snapshot alespoň jednou za tuto dobu
 dashboard_addr = "127.0.0.1:7373"
 ai_workers     = 2               # paralelní AI workeři (respektuje rate limity)
+head_poll_ms   = 5000            # hlídá nové commity a publikuje status na přesný PR HEAD
 
 # Volitelný explicitní seznam repozitářů (jinak auto-discovery z watch_roots).
 # [[repos]]
@@ -45,6 +46,20 @@ daily_usd = 5.0                  # denní strop; po překročení jen triage
 enabled  = false                 # opt-in publikace commit statusů
 provider = "github"
 identity = "status-token"        # keychain klíč, scope repo:status
+
+[issues]
+enabled  = false                 # opt-in GitHub issue při verdict=request-changes
+provider = "github"
+identity = "status-token"        # token musí umět zapisovat commit statusy i issues
+
+[team_sync]
+enabled           = false         # periodický fetch main + explicitní 'krennic done'
+main_branch       = "main"
+fetch_interval_ms = 300000        # 5 minut
+branch_prefix     = "krennic/done"
+provider          = "github"
+identity          = "status-token" # token musí umět vytvořit PR a zapnout auto-merge
+auto_merge        = true
 
 [telemetry]
 enabled       = true
