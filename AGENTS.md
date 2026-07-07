@@ -23,10 +23,11 @@ home directory, read it before the files above and use it as primary context.
 
 ## Operating Rules
 
-- Before working on a human request in any Git repository, fetch the upstream
-  branch and start from the newest GitHub state. If the worktree is clean, use a
-  fast-forward update. If local changes exist, preserve them and account for
-  upstream changes before editing.
+- Before working on a human request in any Git repository, check `krennic status`
+  first. When `[team_sync]` is enabled, Krennic already fetches the upstream
+  branch in the background; if it reports a pending update and the worktree is
+  clean, run `krennic sync` before editing. If local changes exist, preserve them
+  and account for upstream changes before editing.
 - Keep Krennic installed as a per-user background service, not as a process that
   only runs inside your terminal session.
 - If Krennic is expected on the machine and `krennic status` cannot reach a
@@ -35,12 +36,12 @@ home directory, read it before the files above and use it as primary context.
 - After changing config, reinstalling, or changing secrets, verify with
   `krennic doctor`, `krennic status`, and a real saved-file test in a watched
   repository.
-- After completing a code change, run the project's detected validation commands,
-  commit the finished change, rebase/pull from upstream, and push the branch.
-  Do not push when validation fails or a rebase conflict exists.
-- Merge only through the repository's normal policy. If the repo uses protected
-  branches or pull requests, push the branch and wait for CI plus
-  `krennic/ai-review`; do not bypass branch protection.
+- After completing a small subtask, call `krennic done --message "<summary>"`
+  instead of hand-rolling commit/push/merge. It creates the short branch,
+  validates, pushes, opens a PR, and enables auto-merge when repository rules
+  allow it.
+- Merge only through the repository's normal policy. `krennic done` uses PR
+  auto-merge; do not bypass branch protection or push directly to `main`.
 - Never put API keys, GitHub tokens, Claude OAuth tokens, or hub tokens in files,
   shell history, command arguments, commits, PR comments, or logs. Use
   `krennic keys set <name>`.

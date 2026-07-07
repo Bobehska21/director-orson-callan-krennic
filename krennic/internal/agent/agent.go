@@ -23,6 +23,7 @@ import (
 	"github.com/acme/krennic/internal/secrets"
 	"github.com/acme/krennic/internal/status"
 	"github.com/acme/krennic/internal/store"
+	"github.com/acme/krennic/internal/teamsync"
 	"github.com/acme/krennic/internal/telemetry"
 	"github.com/acme/krennic/internal/watcher"
 )
@@ -43,6 +44,7 @@ type Agent struct {
 	publisher status.Publisher
 	reporter  issues.Reporter
 	hubClient *hub.Client
+	teamSync  *teamsync.Manager
 
 	repos     []string
 	remoteFor map[string]string
@@ -133,11 +135,17 @@ func New(cfg config.Config, log *slog.Logger) (*Agent, error) {
 
 	repos := resolveRepos(cfg)
 	remoteFor := resolveRemotes(cfg, repos)
+	var teamSync *teamsync.Manager
+	if cfg.TeamSync.Enabled {
+		token, _ := secrets.Resolve(cfg.TeamSync.Identity)
+		teamSync = teamsync.New(cfg.TeamSync, repos, token)
+		log.Info("team sync enabled", "main", cfg.TeamSync.MainBranch, "repos", len(repos))
+	}
 
 	return &Agent{
 		cfg: cfg, log: log, store: st, metrics: metrics,
 		builder: builder, gateway: gateway, publisher: pub, reporter: issueReporter, hubClient: hubClient,
-		repos: repos, remoteFor: remoteFor, sshKey: sshKey, lastHead: map[string]string{}, retryHead: map[string]time.Time{},
+		teamSync: teamSync, repos: repos, remoteFor: remoteFor, sshKey: sshKey, lastHead: map[string]string{}, retryHead: map[string]time.Time{},
 		wake: make(chan struct{}, 64),
 	}, nil
 }
@@ -201,6 +209,10 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.wg.Add(1)
 		go a.outboxSender()
 	}
+	if a.teamSync != nil && a.teamSync.Enabled() {
+		a.wg.Add(1)
+		go a.teamSyncPoller()
+	}
 	a.wg.Add(1)
 	go a.headPoller()
 
@@ -219,6 +231,26 @@ func (a *Agent) Run(ctx context.Context) error {
 	_ = srv.Close()
 	a.wg.Wait()
 	return a.store.Close()
+}
+
+func (a *Agent) teamSyncPoller() {
+	defer a.wg.Done()
+	ticker := time.NewTicker(a.teamSync.Interval())
+	defer ticker.Stop()
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		case <-ticker.C:
+			for _, st := range a.teamSync.StatusAll(a.ctx) {
+				if st.Error != "" {
+					a.log.Warn("team sync fetch failed", "repo", st.Path, "err", st.Error)
+				} else if st.UpdatePending {
+					a.log.Info("team sync update pending", "repo", st.Path, "branch", st.Branch, "main", short(st.RemoteMain))
+				}
+			}
+		}
+	}
 }
 
 // handleChange runs on the debounced trigger: build event, dedup, enqueue.

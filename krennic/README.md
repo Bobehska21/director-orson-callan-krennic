@@ -136,6 +136,8 @@ skill/scripts/install.ps1        # Windows SCM
 |---|---|
 | `run` | spustí démona |
 | `status` / `recent` / `show <id>` | stav, poslední změny, detail |
+| `sync` | bezpečný fast-forward hlavní větve, jen když je worktree čistý |
+| `done --message "..."` | dokončí podúlohu: validace, větev, commit, push, PR, auto-merge |
 | `pause 1h` / `resume` | dočasně vypnout |
 | `keys set/list/del` | tajemství v OS keychainu |
 | `doctor` | diagnostika prostředí |
@@ -171,13 +173,14 @@ Instalaci a provoz řídí Claude Code Skill v [`skill/SKILL.md`](skill/SKILL.md
 Zkopíruj/symlinkni složku `skill/` do `~/.claude/skills/krennic/` pro použití
 jako `/krennic`.
 
-## Automatická git synchronizace pro AI agenty
-Doplňkové hooky (`.claude/hooks/`) jsou obecný vzor pro AI nástroje: před každým
-lidským příkazem provedou `git fetch` a čistý strom fast-forwardnou na nejnovější
-GitHub stav; po dokončení práce provedou `commit → pull --rebase → validace →
-push`. Validace se volí podle projektu (`make`, `npm`, `go`, `cargo`, `pytest`).
-Krennic změny hodnotí, git hooky je přenášejí. Detaily v [`NAVOD.md`](NAVOD.md)
-→ *Část D* a v [`docs/ai-agent-runbook.md`](docs/ai-agent-runbook.md).
+## Týmová synchronizace pro AI agenty
+Volitelný `[team_sync]` režim dělá z Krennicu bezpečný týmový airlock: démon na
+pozadí periodicky fetchuje `main`, ale nikdy nepřepisuje rozdělaný pracovní
+strom. Když je na GitHubu novější `main`, ukáže to v `krennic status` a
+dashboardu. Jakmile vývojář nebo AI dokončí malou podúlohu, spustí
+`krennic done`: Krennic vytvoří krátkou větev, commitne změny, spustí validaci,
+pushne větev, otevře PR a zapne auto-merge podle pravidel repozitáře. Detaily v
+[`NAVOD.md`](NAVOD.md) → *Část D* a v [`docs/ai-agent-runbook.md`](docs/ai-agent-runbook.md).
 
 ## Dokumentace
 - [`docs/architecture.md`](docs/architecture.md) — komponenty a datový tok

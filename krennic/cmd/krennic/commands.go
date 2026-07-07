@@ -11,7 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/acme/krennic/internal/agent"
 	"github.com/acme/krennic/internal/config"
+	"github.com/acme/krennic/internal/secrets"
+	"github.com/acme/krennic/internal/teamsync"
 	"github.com/spf13/cobra"
 )
 
@@ -61,6 +64,17 @@ func statusCmd(cfgPath *string) *cobra.Command {
 				QueueDepth  int      `json:"queue_depth"`
 				SpendToday  float64  `json:"spend_today"`
 				Budget      float64  `json:"budget"`
+				TeamSync    struct {
+					Enabled bool `json:"enabled"`
+					Repos   []struct {
+						Path          string `json:"path"`
+						Branch        string `json:"branch"`
+						Dirty         bool   `json:"dirty"`
+						RemoteMain    string `json:"remote_main"`
+						UpdatePending bool   `json:"update_pending"`
+						Error         string `json:"error"`
+					} `json:"repos"`
+				} `json:"team_sync"`
 			}
 			if err := getJSON(daemonBase(*cfgPath)+"/api/status", &s); err != nil {
 				return err
@@ -75,6 +89,23 @@ func statusCmd(cfgPath *string) *cobra.Command {
 			fmt.Printf("Náklady dnes: $%.4f / $%.2f\n", s.SpendToday, s.Budget)
 			for _, r := range s.Repos {
 				fmt.Printf("  - %s\n", r)
+			}
+			if s.TeamSync.Enabled {
+				fmt.Println("Team sync:")
+				for _, r := range s.TeamSync.Repos {
+					state := "aktuální"
+					if r.UpdatePending {
+						state = "nová verze čeká"
+					}
+					if r.Error != "" {
+						state = "chyba: " + r.Error
+					}
+					dirty := ""
+					if r.Dirty {
+						dirty = " (rozpracováno)"
+					}
+					fmt.Printf("  - %s [%s%s] %s\n", r.Path, r.Branch, dirty, state)
+				}
 			}
 			return nil
 		},
@@ -205,4 +236,73 @@ func readSecretStdin(prompt string) (string, error) {
 		return "", err
 	}
 	return strings.TrimRight(line, "\r\n"), nil
+}
+
+func doneCmd(cfgPath *string) *cobra.Command {
+	var repoPath, message string
+	cmd := &cobra.Command{
+		Use:   "done",
+		Short: "Dokončí rozpracovanou podúlohu: branch, commit, validace, push, PR auto-merge",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(*cfgPath)
+			if err != nil {
+				return err
+			}
+			if !cfg.TeamSync.Enabled {
+				return fmt.Errorf("team_sync is disabled in config")
+			}
+			repos := resolveReposForCLI(cfg)
+			repo, err := teamsync.PickRepo(repos, repoPath)
+			if err != nil {
+				return err
+			}
+			token, _ := secrets.Resolve(cfg.TeamSync.Identity)
+			m := teamsync.New(cfg.TeamSync, repos, token)
+			res, err := m.Done(cmd.Context(), repo, message)
+			if err != nil {
+				if res.LogPath != "" {
+					return fmt.Errorf("%w\nvalidation log: %s", err, res.LogPath)
+				}
+				return err
+			}
+			fmt.Printf("Repo:   %s\nBranch: %s\nCommit: %s\nPR:     %s\nLog:    %s\n", res.RepoPath, res.Branch, res.Commit, res.PRURL, res.LogPath)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&repoPath, "repo", "", "repo path (optional when run inside a watched repo)")
+	cmd.Flags().StringVarP(&message, "message", "m", "", "commit/PR message")
+	return cmd
+}
+
+func syncCmd(cfgPath *string) *cobra.Command {
+	var repoPath string
+	cmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Bezpečně fast-forwardne main, jen když je pracovní strom čistý",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(*cfgPath)
+			if err != nil {
+				return err
+			}
+			repos := resolveReposForCLI(cfg)
+			repo, err := teamsync.PickRepo(repos, repoPath)
+			if err != nil {
+				return err
+			}
+			m := teamsync.New(cfg.TeamSync, repos, "")
+			st, err := m.Sync(repo)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Repo: %s\nBranch: %s\nMain: %s\nUpdate pending: %v\n", st.Path, st.Branch, st.RemoteMain, st.UpdatePending)
+			_ = cmd
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&repoPath, "repo", "", "repo path (optional when run inside a watched repo)")
+	return cmd
+}
+
+func resolveReposForCLI(cfg config.Config) []string {
+	return agent.ResolveRepos(cfg)
 }

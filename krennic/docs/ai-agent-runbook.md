@@ -36,30 +36,32 @@ folder layout:
    commands such as `npm run test`, `npm run lint`, `npm run build`, `go test
    ./...`, `go vet ./...`, `go build ./...`, `cargo test`, `cargo build`, or
    `pytest`.
-7. Commit only finished, related changes.
-8. Rebase or pull from upstream after the commit, resolve conflicts if any, then
-   rerun validation if the rebase changed code.
-9. Push the branch only when validation passes and no conflict remains.
-10. Merge only through the repository's policy. For protected branches, create or
-    update the PR and wait for CI plus `krennic/ai-review`.
+7. When a small subtask is complete, run `krennic done --message "<summary>"`.
+8. Let Krennic create the short branch, validate, push, open the PR, and enable
+   auto-merge through GitHub branch protection.
+9. Do not hand-roll commits, pushes, or direct merges to `main` unless the user
+   explicitly disables team sync.
 
 Never claim a task is complete if local changes were left uncommitted,
 unvalidated, or unpushed without saying so explicitly.
 
-## Automatic hooks
+## Team sync
 
-This repository ships generic hook scripts in `.claude/hooks/`:
+Krennic's `[team_sync]` mode replaces repository hook scripts. The daemon
+periodically fetches the configured main branch, reports pending updates in
+`krennic status` and the dashboard, and never mutates a dirty working tree.
 
-- `pre-work-fetch.sh` runs before a human request and synchronizes with upstream
-  when it can do so safely.
-- `auto-commit-push.sh` runs after a completed request and commits, rebases,
-  validates, and pushes finished work.
+Use:
 
-Claude Code loads these through the tracked `.claude/settings.json`. Other AI
-tools should wire equivalent lifecycle hooks to the same scripts, or run the
-same steps explicitly before and after every prompt. The scripts are intentionally
-generic: they do not depend on this repository name, a specific branch, or a
-single programming language.
+```bash
+krennic done --message "short summary"
+krennic sync
+```
+
+`krennic done` is the explicit "I am finished" signal. It creates a short branch,
+commits local changes, runs detected validation commands, pushes the branch,
+opens a PR, and enables GitHub auto-merge. `krennic sync` only fast-forwards the
+configured main branch when the current tree is clean.
 
 The repository also includes short entrypoint files for common agents:
 `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, `.clinerules`,
@@ -168,6 +170,15 @@ identity = "status-token"
 enabled  = true
 provider = "github"
 identity = "status-token"
+
+[team_sync]
+enabled           = true
+main_branch       = "main"
+fetch_interval_ms = 300000
+branch_prefix     = "krennic/done"
+provider          = "github"
+identity          = "status-token"
+auto_merge        = true
 ```
 
 After editing config, restart the service.
@@ -329,6 +340,16 @@ Check all of these:
 - The token can write commit statuses to this repository.
 - `head_poll_ms` is enabled so new commits are rechecked.
 - The status was published to the latest PR head SHA.
+
+### `krennic done` refuses to run
+
+Common causes:
+
+- The working tree is clean; there is nothing to finish.
+- The current branch is not based on the latest `origin/main`; finish or save
+  work, sync/rebase manually, then retry.
+- Validation failed; inspect the log path printed by the command.
+- `team_sync.identity` token cannot create PRs or enable auto-merge.
 
 ### Shadow push uses the wrong remote
 

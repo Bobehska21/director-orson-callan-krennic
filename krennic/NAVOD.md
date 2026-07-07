@@ -280,55 +280,58 @@ Jednoduché pravidlo pro každého vývojáře:
 
 ---
 
-# Část D · Automatická synchronizace kódu s GitHubem pro AI agenty
+# Část D · Týmová synchronizace kódu s GitHubem
 
-> Pozn.: Tohle **není součást krennicu** – je to doplňkový pracovní postup pro
-> AI nástroje přes hooky / skripty v repozitáři. Krennic změny **hodnotí**;
-> přenos kódu dělá git.
+Volitelný režim `[team_sync]` řeší rychlé sdílení změn bez toho, aby komukoliv
+přepisoval rozepsaný kód pod rukama.
 
-Aby si vývojáři a AI agenti nepřepisovali práci a měli pořád aktuální kód, platí
-pro každý projekt stejný postup.
-
-Před tím, než AI agent začne pracovat na lidském příkazu:
+V `config.toml`:
 
 ```
-1. git fetch          # zjistí nejnovější stav na GitHubu
-2. fast-forward pull  # pokud je pracovní strom čistý
-3. git status         # pokud jsou lokální změny, nic nepřepsat a zohlednit je
+[team_sync]
+enabled           = true
+main_branch       = "main"
+fetch_interval_ms = 300000
+branch_prefix     = "krennic/done"
+provider          = "github"
+identity          = "status-token"
+auto_merge        = true
 ```
 
-Po **každé dokončené práci**, pokud agent změnil soubory, se automaticky provede:
+Co se děje na pozadí:
 
 ```
-1. commit          # nahraje tvoje změny do commitu
-2. pull --rebase   # stáhne kolegovy nejnovější změny (tvoje se přehrají navrch)
-3. validace        # test/build/lint podle typu projektu
-4. push            # nahraje větev na GitHub, jen když validace prošla
+1. démon pravidelně fetchuje origin/main
+2. nikdy automaticky nemění rozdělaný pracovní strom
+3. když je na GitHubu novější main, ukáže upozornění ve statusu a dashboardu
 ```
 
-- Pořadí je zvolené tak, aby se cizí práce **nepřepsala**.
-- Když jsi jen povídal a nic neměnil → **neudělá se nic** (no-op).
-- Do zprávy commitu se přidá **seznam změněných souborů + diffstat**, aby další
-  vývojář / AI agent viděl, čeho přesně se změna týkala (méně kolizí).
-- Při skutečném konfliktu ve stejných řádcích → **nic se nepřepíše**, jen se
-  zobrazí upozornění a konflikt vyřešíš ručně (`git status`).
-- Do chráněné větve se nemerguje násilím. Když projekt používá Pull Requesty,
-  agent má pushnout větev, otevřít nebo aktualizovat PR a počkat na CI plus
-  `krennic/ai-review`.
+Když vývojář nebo AI dokončí malou podúlohu:
 
-Navíc dva ochranné hooky:
+```
+krennic done --message "stručný popis změny"
+```
 
-- **Před prací** (`pre-work-fetch.sh`) — před každým lidským příkazem tiše ověří
-  remote a když někdo mezitím pushnul, bezpečně stáhne čistý strom nebo upozorní
-  agenta, že musí zohlednit lokální změny.
-- **Po práci** (`auto-commit-push.sh`) — commitne hotovou změnu, stáhne novinky
-  přes rebase, spustí dostupné kontroly podle projektu (`make`, `npm`, `go`,
-  `cargo`, `pytest`) a pushne jen při zeleném výsledku.
+Krennic potom:
 
-Claude Code má základní aktivaci v `.claude/settings.json`, takže hooky po klonu
-fungují hned. Lokální výjimky patří do `.claude/settings.local.json`. Jiné AI
-nástroje mají vlastní mechanismus, ale skripty jsou obecné shell skripty, takže
-je může spouštět jakýkoliv agent před a po každém promptu.
+```
+1. ověří, že pracovní větev vychází z aktuálního origin/main
+2. vytvoří krátkou větev s prefixem krennic/done
+3. commitne lokální změny
+4. spustí validaci podle projektu (make, npm, go, cargo, pytest)
+5. pushne větev
+6. otevře Pull Request do main
+7. zapne GitHub auto-merge, takže merge proběhne až po zelených kontrolách
+```
+
+Když je lokální `main` čistý a chceš si novou verzi stáhnout ručně:
+
+```
+krennic sync
+```
+
+Pokud máš rozdělanou práci, `krennic sync` ji nepřepíše. Nejdřív práci dokonči,
+nebo ji ručně odlož podle běžného Git workflow.
 
 ---
 

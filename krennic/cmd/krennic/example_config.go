@@ -56,6 +56,15 @@ enabled  = false                 # opt-in GitHub issue při verdict=request-chan
 provider = "github"
 identity = "status-token"        # token musí umět zapisovat commit statusy i issues
 
+[team_sync]
+enabled           = false         # periodický fetch main + explicitní 'krennic done'
+main_branch       = "main"
+fetch_interval_ms = 300000        # 5 minut
+branch_prefix     = "krennic/done"
+provider          = "github"
+identity          = "status-token" # token musí umět vytvořit PR a zapnout auto-merge
+auto_merge        = true
+
 [telemetry]
 enabled       = true
 otlp_endpoint = ""               # volitelný OTLP collector (jinak jen lokální /metrics)

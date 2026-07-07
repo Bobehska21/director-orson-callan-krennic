@@ -69,6 +69,11 @@ func (g *Git) HeadSHA() string {
 	return out
 }
 
+// RevParse resolves a ref to a SHA.
+func (g *Git) RevParse(ref string) (string, error) {
+	return g.run("rev-parse", "--verify", ref)
+}
+
 // RepoName returns the basename of the repo root.
 func (g *Git) RepoName() string { return filepath.Base(g.Root) }
 
@@ -109,6 +114,47 @@ func (g *Git) Version() (major, minor int) {
 func (g *Git) IsClean() bool {
 	out, err := g.run("status", "--porcelain")
 	return err == nil && out == ""
+}
+
+// Fetch updates remote refs for a specific branch.
+func (g *Git) Fetch(remote, branch string) error {
+	_, err := g.run("fetch", "--quiet", remote, branch)
+	return err
+}
+
+// FastForward merges the given ref into the current branch using --ff-only.
+func (g *Git) FastForward(ref string) error {
+	_, err := g.run("merge", "--ff-only", ref)
+	return err
+}
+
+// IsAncestor reports whether ancestor is reachable from descendant.
+func (g *Git) IsAncestor(ancestor, descendant string) bool {
+	_, err := g.run("merge-base", "--is-ancestor", ancestor, descendant)
+	return err == nil
+}
+
+// CreateBranch creates and checks out a new branch at the current HEAD.
+func (g *Git) CreateBranch(name string) error {
+	_, err := g.run("switch", "-c", name)
+	return err
+}
+
+// AddAllCommit stages all changes and creates a commit.
+func (g *Git) AddAllCommit(message string) (string, error) {
+	if _, err := g.run("add", "-A"); err != nil {
+		return "", err
+	}
+	if _, err := g.run("commit", "-m", message); err != nil {
+		return "", err
+	}
+	return g.HeadSHA(), nil
+}
+
+// PushBranch pushes a branch to a remote, setting upstream.
+func (g *Git) PushBranch(remote, branch string) error {
+	_, err := g.run("push", "-u", remote, branch)
+	return err
 }
 
 // ChangedPaths returns all modified, staged, and untracked repo-relative paths.
