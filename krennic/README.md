@@ -171,16 +171,17 @@ Instalaci a provoz řídí Claude Code Skill v [`skill/SKILL.md`](skill/SKILL.md
 Zkopíruj/symlinkni složku `skill/` do `~/.claude/skills/krennic/` pro použití
 jako `/krennic`.
 
-## Automatická git synchronizace (tento repo)
-Doplňkové Claude Code hooky (`.claude/hooks/`) po každé dokončené práci provedou
-`commit → pull --rebase → push` — nahrají tvoje změny a stáhnou kolegovy, v pořadí
-bezpečném proti konfliktům; do commitu přidají diffstat. Navíc **před prací**
-upozorní, když kolega mezitím pushnul, a **před pushem** spustí `go build` (rozbitý
-kód se kolegovi nepošle). Není součást krennicu (ten změny jen hodnotí); aktivace je
-osobní přes `.claude/settings.local.json`. Detaily v [`NAVOD.md`](NAVOD.md) → *Část C*.
+## Automatická git synchronizace pro AI agenty
+Doplňkové hooky (`.claude/hooks/`) jsou obecný vzor pro AI nástroje: před každým
+lidským příkazem provedou `git fetch` a čistý strom fast-forwardnou na nejnovější
+GitHub stav; po dokončení práce provedou `commit → pull --rebase → validace →
+push`. Validace se volí podle projektu (`make`, `npm`, `go`, `cargo`, `pytest`).
+Krennic změny hodnotí, git hooky je přenášejí. Detaily v [`NAVOD.md`](NAVOD.md)
+→ *Část D* a v [`docs/ai-agent-runbook.md`](docs/ai-agent-runbook.md).
 
 ## Dokumentace
 - [`docs/architecture.md`](docs/architecture.md) — komponenty a datový tok
 - [`docs/git-transport.md`](docs/git-transport.md) — stínové snapshoty
 - [`docs/data-contract.md`](docs/data-contract.md) — schémata a routing
+- [`docs/ai-agent-runbook.md`](docs/ai-agent-runbook.md) — přesný návod pro AI nástroje, aby Krennic správně instalovaly, spouštěly a ověřovaly
 - [`skill/reference/data-handling-policy.md`](skill/reference/data-handling-policy.md) — co opouští stroj

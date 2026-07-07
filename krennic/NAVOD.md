@@ -280,40 +280,55 @@ Jednoduché pravidlo pro každého vývojáře:
 
 ---
 
-# Část D · Automatická synchronizace kódu s kolegou (git)
+# Část D · Automatická synchronizace kódu s GitHubem pro AI agenty
 
-> Pozn.: Tohle **není součást krennicu** – je to doplňkový pracovní postup přes
-> Claude Code hooky (`.claude/hooks/` v kořeni repa). Krennic změny jen
-> **hodnotí**; přenos kódu dělá git.
+> Pozn.: Tohle **není součást krennicu** – je to doplňkový pracovní postup pro
+> AI nástroje přes hooky / skripty v repozitáři. Krennic změny **hodnotí**;
+> přenos kódu dělá git.
 
-Aby si vývojáři nepřepisovali práci a měli pořád aktuální kód, po **každé
-dokončené práci** se automaticky provede:
+Aby si vývojáři a AI agenti nepřepisovali práci a měli pořád aktuální kód, platí
+pro každý projekt stejný postup.
+
+Před tím, než AI agent začne pracovat na lidském příkazu:
+
+```
+1. git fetch          # zjistí nejnovější stav na GitHubu
+2. fast-forward pull  # pokud je pracovní strom čistý
+3. git status         # pokud jsou lokální změny, nic nepřepsat a zohlednit je
+```
+
+Po **každé dokončené práci**, pokud agent změnil soubory, se automaticky provede:
 
 ```
 1. commit          # nahraje tvoje změny do commitu
 2. pull --rebase   # stáhne kolegovy nejnovější změny (tvoje se přehrají navrch)
-3. push            # nahraje na GitHub
+3. validace        # test/build/lint podle typu projektu
+4. push            # nahraje větev na GitHub, jen když validace prošla
 ```
 
-- Pořadí je zvolené tak, aby to **nikdy nespadlo a nic nepřepsalo**.
+- Pořadí je zvolené tak, aby se cizí práce **nepřepsala**.
 - Když jsi jen povídal a nic neměnil → **neudělá se nic** (no-op).
 - Do zprávy commitu se přidá **seznam změněných souborů + diffstat**, aby další
-  vývojář / Claude viděl, čeho přesně se změna týkala (méně kolizí).
+  vývojář / AI agent viděl, čeho přesně se změna týkala (méně kolizí).
 - Při skutečném konfliktu ve stejných řádcích → **nic se nepřepíše**, jen se
   zobrazí upozornění a konflikt vyřešíš ručně (`git status`).
+- Do chráněné větve se nemerguje násilím. Když projekt používá Pull Requesty,
+  agent má pushnout větev, otevřít nebo aktualizovat PR a počkat na CI plus
+  `krennic/ai-review`.
 
 Navíc dva ochranné hooky:
 
-- **Před prací** (`pre-work-fetch.sh`, UserPromptSubmit) — před každým příkazem
-  tiše ověří remote a když kolega mezitím pushnul, **upozorní** (a když máš čistý
-  strom, bezpečně stáhne). Vidíš, čeho se nedotýkat, dřív než začneš.
-- **Před pushem** (brána v `auto-commit-push.sh`) — než se kód pošle kolegovi,
-  spustí `go build ./...`. Když se **nepřeloží, nepushne** (commitne jen lokálně) —
-  ať kolegovi nepřistane rozbitý kód. Opraví se a nahraje při příštím sync.
+- **Před prací** (`pre-work-fetch.sh`) — před každým lidským příkazem tiše ověří
+  remote a když někdo mezitím pushnul, bezpečně stáhne čistý strom nebo upozorní
+  agenta, že musí zohlednit lokální změny.
+- **Po práci** (`auto-commit-push.sh`) — commitne hotovou změnu, stáhne novinky
+  přes rebase, spustí dostupné kontroly podle projektu (`make`, `npm`, `go`,
+  `cargo`, `pytest`) a pushne jen při zeleném výsledku.
 
-Aktivace je osobní (v `.claude/settings.local.json`, který je gitignored), takže
-se nikomu nevnucuje. Skript je ale ve verzi repa, takže ho má každý po naklonování
-k dispozici. Zapnutí / vypnutí / přehled: příkaz `/hooks` v Claude Code.
+Claude Code má základní aktivaci v `.claude/settings.json`, takže hooky po klonu
+fungují hned. Lokální výjimky patří do `.claude/settings.local.json`. Jiné AI
+nástroje mají vlastní mechanismus, ale skripty jsou obecné shell skripty, takže
+je může spouštět jakýkoliv agent před a po každém promptu.
 
 ---
 

@@ -13,6 +13,7 @@ import (
 )
 
 const claudeOAuthTokenSecret = "claude-oauth-token"
+const claudePermissionMode = "bypassPermissions"
 
 // ClaudeOAuthTokenSecret is the Krennic keychain entry used by claude-cli.
 func ClaudeOAuthTokenSecret() string {
@@ -48,7 +49,7 @@ func (p *ClaudeCLIProvider) Complete(ctx context.Context, req CompletionRequest)
 	args := []string{"-p", req.User,
 		"--output-format", "json",
 		"--allowedTools", "Read",
-		"--permission-mode", "dontAsk",
+		"--permission-mode", claudePermissionMode,
 	}
 	if req.System != "" {
 		args = append(args, "--append-system-prompt", req.System)
