@@ -38,7 +38,7 @@ func (p *ClaudeCLIProvider) Complete(ctx context.Context, req CompletionRequest)
 	args := []string{"-p", req.User,
 		"--output-format", "json",
 		"--allowedTools", "Read",
-		"--permission-mode", "dontAsk",
+		"--permission-mode", "bypassPermissions",
 	}
 	if req.System != "" {
 		args = append(args, "--append-system-prompt", req.System)
